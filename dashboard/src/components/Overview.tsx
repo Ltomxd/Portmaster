@@ -72,9 +72,10 @@ function ProcessTable({ ports, docker, onKill, onKillAll, onProtect }: { ports: 
     const q = query.toLowerCase()
     if (q && !String(p.port).includes(q) && !(p.process ?? '').toLowerCase().includes(q) && !String(p.pid ?? '').includes(q) && !(p.command ?? '').toLowerCase().includes(q)) return false
     if (portF !== 'all' && String(p.port) !== portF) return false
-    if (srcF === 'active') return p.state === 'LISTEN'
-    if (srcF === 'services') return p.state === 'LISTEN' && !!p.process && !!p.pid
-    if (srcF === 'docker') return Boolean(dockerPortMap[p.port])
+    const isListening = /LISTEN/i.test(p.state)
+    if (srcF === 'active') return isListening
+    if (srcF === 'services') return isListening && (Boolean(dockerPortMap[p.port]) || !!p.process || !!p.pid || !!p.command)
+    if (srcF === 'docker') return isListening && Boolean(dockerPortMap[p.port])
     if (srcF === 'linux') return p.source === 'linux'
     if (srcF === 'windows') return p.source === 'windows'
     return true
