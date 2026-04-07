@@ -17,6 +17,23 @@ export interface DashboardOptions {
   refreshInterval?: number;
 }
 
+
+function serializeGuards() {
+  const out: Record<string, any> = {};
+  for (const [k, g] of getAllGuards()) {
+    const options = g.getOptions();
+    out[k] = {
+      running: g.isRunning(),
+      recentEvents: g.getEventLog().slice(-20),
+      ports: options.ports,
+      autoKill: options.autoKill,
+      allowedProcesses: options.allowedProcesses,
+      intervalMs: options.intervalMs,
+    };
+  }
+  return out;
+}
+
 // CPU delta tracking
 let prevCpuTotal = 0, prevCpuIdle = 0;
 
@@ -42,6 +59,7 @@ export function startDashboard(options: DashboardOptions = {}): void {
   }
 
   // ── REST API ──────────────────────────────────────────────────────────────
+
   app.get('/api/snapshot', (_req, res) => res.json(collectSnapshot()));
   app.get('/api/ports',    (_req, res) => res.json(scanPorts()));
   app.get('/api/system',   (_req, res) => res.json(getSystemInfo()));
@@ -49,19 +67,12 @@ export function startDashboard(options: DashboardOptions = {}): void {
   app.get('/api/pm2',      (_req, res) => res.json({ available: isPm2Available(), processes: getPm2Processes() }));
 
   app.get('/api/guards', (_req, res) => {
-    const out: Record<string, any> = {};
-    for (const [k, g] of getAllGuards()) {
-      const options = g.getOptions();
-      out[k] = {
-        running: g.isRunning(),
-        recentEvents: g.getEventLog().slice(-20),
-        ports: options.ports,
-        autoKill: options.autoKill,
-        allowedProcesses: options.allowedProcesses,
-        intervalMs: options.intervalMs,
-      };
-    }
-    res.json(out);
+    res.json(serializeGuards());
+  });
+
+  // Alias for common typo /api/guard
+  app.get('/api/guard', (_req, res) => {
+    res.json(serializeGuards());
   });
 
   app.post('/api/guards', (req, res) => {
@@ -121,6 +132,11 @@ export function startDashboard(options: DashboardOptions = {}): void {
     res.json(pm2Action(action as any, name));
   });
 
+  // Return JSON for unknown API routes (avoid HTML fallback confusion)
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ success: false, error: 'API route not found' });
+  });
+
   // SPA fallback
   app.get('*', (_req, res) => {
     if (distPath) {
@@ -169,21 +185,7 @@ function collectSnapshot() {
     pm2:       isPm2Available()    ? getPm2Processes()   : [],
     system:    getSystemInfo(),
     wsl:       detectWsl(),
-    guards:    (() => {
-      const out: Record<string, any> = {};
-      for (const [k, g] of getAllGuards()) {
-        const options = g.getOptions();
-        out[k] = {
-          running: g.isRunning(),
-          recentEvents: g.getEventLog().slice(-20),
-          ports: options.ports,
-          autoKill: options.autoKill,
-          allowedProcesses: options.allowedProcesses,
-          intervalMs: options.intervalMs,
-        };
-      }
-      return out;
-    })(),
+    guards: serializeGuards(),
   };
 }
 
