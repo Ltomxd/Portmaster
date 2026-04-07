@@ -58,15 +58,23 @@ function Dashboard() {
 
   const handleProtectPort = useCallback(async (port: number, process: string | null) => {
     const key = `port-${port}`
-    const result = await createGuard({
-      key,
-      ports: [port],
-      autoKill: false,
-      allowedProcesses: process ? [process] : [],
-      intervalMs: 1500,
-    })
-    if (result.success) toast(`Guard :${port} created`, 'success')
-    else toast(result.error ?? 'Guard error', 'error')
+    try {
+      const result = await createGuard({
+        key,
+        ports: [port],
+        autoKill: false,
+        allowedProcesses: process ? [process] : [],
+        intervalMs: 1500,
+      })
+      if (result?.success) {
+        toast(`Guard activo para :${port}`, 'success')
+        setTab('guard')
+      } else {
+        toast(result?.error ?? 'No se pudo crear la guardia', 'error')
+      }
+    } catch (e: any) {
+      toast(e?.message ?? 'Error creando guardia', 'error')
+    }
     refresh()
   }, [createGuard, toast, refresh])
 

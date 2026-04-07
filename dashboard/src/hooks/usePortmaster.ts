@@ -44,6 +44,16 @@ export function usePortmaster() {
   const refresh = useCallback(() =>
     fetch('/api/snapshot').then(r => r.json()).then(setSnapshot).catch(() => {}), [])
 
+
+  const safeJson = async (r: Response) => {
+    try {
+      return await r.json()
+    } catch {
+      return { success: false, error: `HTTP ${r.status}` }
+    }
+  }
+
+
   const killPort = useCallback(async (port: number) => {
     const r = await fetch(`/api/ports/${port}/kill`, { method: 'POST' })
     return r.json()
@@ -60,26 +70,44 @@ export function usePortmaster() {
   }, [])
 
   const createGuard = useCallback(async (payload: { key: string; ports: number[]; autoKill?: boolean; allowedProcesses?: string[]; intervalMs?: number }) => {
-    const r = await fetch('/api/guards', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    return r.json()
+    try {
+      const r = await fetch('/api/guards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await safeJson(r)
+      if (!r.ok) return { success: false, error: data.error ?? `HTTP ${r.status}` }
+      return data
+    } catch (e: any) {
+      return { success: false, error: e?.message ?? 'Network error' }
+    }
   }, [])
 
   const updateGuard = useCallback(async (key: string, payload: { ports?: number[]; autoKill?: boolean; allowedProcesses?: string[]; intervalMs?: number }) => {
-    const r = await fetch(`/api/guards/${encodeURIComponent(key)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    return r.json()
+    try {
+      const r = await fetch(`/api/guards/${encodeURIComponent(key)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await safeJson(r)
+      if (!r.ok) return { success: false, error: data.error ?? `HTTP ${r.status}` }
+      return data
+    } catch (e: any) {
+      return { success: false, error: e?.message ?? 'Network error' }
+    }
   }, [])
 
   const deleteGuard = useCallback(async (key: string) => {
-    const r = await fetch(`/api/guards/${encodeURIComponent(key)}`, { method: 'DELETE' })
-    return r.json()
+    try {
+      const r = await fetch(`/api/guards/${encodeURIComponent(key)}`, { method: 'DELETE' })
+      const data = await safeJson(r)
+      if (!r.ok) return { success: false, error: data.error ?? `HTTP ${r.status}` }
+      return data
+    } catch (e: any) {
+      return { success: false, error: e?.message ?? 'Network error' }
+    }
   }, [])
 
   return { snapshot, connState, refresh, killPort, dockerAction, pm2Action, createGuard, updateGuard, deleteGuard }
