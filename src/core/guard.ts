@@ -70,6 +70,16 @@ export class PortGuard extends EventEmitter {
     return new Map(this.snapshot);
   }
 
+  getOptions(): Required<GuardOptions> {
+    return {
+      ports: [...this.options.ports],
+      autoKill: this.options.autoKill,
+      allowedProcesses: [...this.options.allowedProcesses],
+      intervalMs: this.options.intervalMs,
+      onEvent: this.options.onEvent,
+    };
+  }
+
   private updateSnapshot(initial: boolean): void {
     const current = scanPorts(this.options.ports);
     const currentMap = new Map(current.map(p => [p.port, p]));

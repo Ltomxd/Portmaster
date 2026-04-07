@@ -2,24 +2,9 @@
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:      #0c0c0e;
-  --surface: #141418;
-  --surface2:#1c1c22;
-  --surface3:#242430;
-  --border:  #2a2a38;
-  --border2: #383848;
-  --text:    #e8e8f0;
-  --muted:   #5a5a78;
-  --subtle:  #9090b0;
-  --red:     #e53e3e;
-  --red2:    #fc5858;
-  --red-glow:rgba(229,62,62,.15);
-  --green:   #38d9a9;
-  --yellow:  #ffd166;
-  --blue:    #74b9ff;
-  --gray:    #a0a0b8;
-  --font:    'Space Grotesk', system-ui, sans-serif;
-  --mono:    'JetBrains Mono', monospace;
+  --bg:#0c0c0e;--surface:#141418;--surface2:#1c1c22;--surface3:#242430;--border:#2a2a38;--border2:#383848;
+  --text:#e8e8f0;--muted:#5a5a78;--subtle:#9090b0;--red:#e53e3e;--red2:#fc5858;--red-glow:rgba(229,62,62,.15);
+  --green:#38d9a9;--yellow:#ffd166;--blue:#74b9ff;--gray:#a0a0b8;--font:'Space Grotesk',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
 }
 html,body,#root{height:100%;overflow:hidden}
 body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
@@ -28,6 +13,49 @@ input,select{font-family:var(--font)}
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+.app-shell{display:flex;height:100%;background:var(--bg);position:relative}
+.app-main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.app-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 24px;min-height:56px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;flex-wrap:wrap}
+.header-title-wrap{display:flex;align-items:baseline;gap:10px;min-width:0;overflow:hidden}
+.header-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.app-footer{border-top:1px solid var(--border);padding:6px 24px;background:var(--surface);display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted);flex-shrink:0;gap:8px;flex-wrap:wrap}
+
+.sidebar{width:210px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column}
+.sidebar-backdrop{display:none}
+
+.app-hbtn{padding:5px 14px;border-radius:6px;font-size:12px;font-weight:500;transition:all .15s}
+.app-hbtn:hover{border-color:var(--red2)!important;color:var(--red2)!important}
+.app-hbtn-mobile{display:none}
+
+.res-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:10px}
+.load-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+.table-wrap{width:100%;overflow:auto}
+.process-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.filter-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface2);flex-wrap:wrap}
+
+@media (max-width: 1024px){
+  .app-header{padding:10px 16px}
+  .app-footer{padding:8px 16px}
+}
+@media (max-width: 900px){
+  .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:240;transform:translateX(-100%);transition:transform .2s ease}
+  .sidebar.open{transform:translateX(0)}
+  .sidebar-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;z-index:230;transition:opacity .2s ease}
+  .sidebar-backdrop.open{opacity:1;pointer-events:auto}
+  .app-hbtn-mobile{display:inline-flex}
+}
+@media (max-width: 768px){
+  .header-title-wrap{flex-direction:column;align-items:flex-start;gap:2px}
+  .header-actions{width:100%;justify-content:flex-end}
+}
+@media (max-width: 640px){
+  body{font-size:12px}
+  .app-header{padding:10px 12px}
+  .app-footer{padding:8px 12px;flex-direction:column;align-items:flex-start}
+}
+
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
