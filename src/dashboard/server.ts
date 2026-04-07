@@ -4,11 +4,11 @@ import * as path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { execSync } from 'child_process';
 import { readFileSync, accessSync } from 'fs';
-import { scanPorts } from '../core/scanner';
+import { scanPorts, isPortInUse, getPortInfo } from '../core/scanner';
 import { getContainers, isDockerAvailable, stopContainer, startContainer, restartContainer, getContainerLogs } from '../core/docker';
-import { getPm2Processes, isPm2Available, pm2Action } from '../core/pm2';
+import { getPm2Processes, isPm2Available, pm2Action, getPm2Logs } from '../core/pm2';
 import { killPort } from '../core/killer';
-import { getAllGuards } from '../core/guard';
+import { getAllGuards, startGuard, stopGuard } from '../core/guard';
 import { detectWsl } from '../core/wsl';
 
 export interface DashboardOptions {
@@ -17,12 +17,34 @@ export interface DashboardOptions {
   refreshInterval?: number;
 }
 
+
+function serializeGuards() {
+  const out: Record<string, any> = {};
+  for (const [k, g] of getAllGuards()) {
+    const options = g.getOptions();
+    out[k] = {
+      running: g.isRunning(),
+      recentEvents: g.getEventLog().slice(-20),
+      ports: options.ports,
+      autoKill: options.autoKill,
+      allowedProcesses: options.allowedProcesses,
+      intervalMs: options.intervalMs,
+    };
+  }
+  return out;
+}
+
 // CPU delta tracking
 let prevCpuTotal = 0, prevCpuIdle = 0;
 
 export function startDashboard(options: DashboardOptions = {}): void {
-  const PORT = options.port ?? 4321;
+  const PORT = options.port ?? 54321;
   const HOST = options.host ?? '0.0.0.0';
+
+  if (isPortInUse(PORT)) {
+    throw new Error(`Dashboard port ${PORT} is already in use. Stop the existing service or run with --port <free_port>.`);
+  }
+
   const INTERVAL = options.refreshInterval ?? 3000;
 
   const app = express();
@@ -42,6 +64,7 @@ export function startDashboard(options: DashboardOptions = {}): void {
   }
 
   // ── REST API ──────────────────────────────────────────────────────────────
+
   app.get('/api/snapshot', (_req, res) => res.json(collectSnapshot()));
   app.get('/api/ports',    (_req, res) => res.json(scanPorts()));
   app.get('/api/system',   (_req, res) => res.json(getSystemInfo()));
@@ -49,11 +72,86 @@ export function startDashboard(options: DashboardOptions = {}): void {
   app.get('/api/pm2',      (_req, res) => res.json({ available: isPm2Available(), processes: getPm2Processes() }));
 
   app.get('/api/guards', (_req, res) => {
-    const out: Record<string, any> = {};
-    for (const [k, g] of getAllGuards()) {
-      out[k] = { running: g.isRunning(), recentEvents: g.getEventLog().slice(-20) };
+    res.json(serializeGuards());
+  });
+
+  // Alias for common typo /api/guard
+  app.get('/api/guard', (_req, res) => {
+    res.json(serializeGuards());
+  });
+
+  app.post('/api/guards', (req, res) => {
+    const { key, ports, autoKill, allowedProcesses, intervalMs } = req.body ?? {};
+    if (!key || !Array.isArray(ports) || ports.length === 0) {
+      return res.status(400).json({ success: false, error: 'key and ports are required' });
     }
-    res.json(out);
+    startGuard(String(key), {
+      ports: ports.map((p: any) => parseInt(String(p))).filter((p: number) => p > 0 && p <= 65535),
+      autoKill: Boolean(autoKill),
+      allowedProcesses: Array.isArray(allowedProcesses) ? allowedProcesses.map((v: any) => String(v)).filter(Boolean) : [],
+      intervalMs: intervalMs ? parseInt(String(intervalMs)) : 1500,
+    });
+    res.json({ success: true });
+  });
+
+  app.patch('/api/guards/:key', (req, res) => {
+    const key = req.params.key;
+    const guard = getAllGuards().get(key);
+    if (!guard) return res.status(404).json({ success: false, error: 'guard not found' });
+
+    const current = guard.getOptions();
+    const body = req.body ?? {};
+    startGuard(key, {
+      ports: Array.isArray(body.ports) ? body.ports.map((p: any) => parseInt(String(p))).filter((p: number) => p > 0 && p <= 65535) : current.ports,
+      autoKill: typeof body.autoKill === 'boolean' ? body.autoKill : current.autoKill,
+      allowedProcesses: Array.isArray(body.allowedProcesses) ? body.allowedProcesses.map((v: any) => String(v)).filter(Boolean) : current.allowedProcesses,
+      intervalMs: body.intervalMs ? parseInt(String(body.intervalMs)) : current.intervalMs,
+    });
+
+    res.json({ success: true });
+  });
+
+  app.delete('/api/guards/:key', (req, res) => {
+    stopGuard(req.params.key);
+    res.json({ success: true });
+  });
+
+
+  app.get('/api/ports/:port/logs', (req, res) => {
+    const port = parseInt(req.params.port);
+    const lines = parseInt(String(req.query.lines ?? '80'));
+    if (!port || port <= 0) return res.status(400).json({ success: false, error: 'invalid port' });
+
+    const info = getPortInfo(port);
+    const dockerMatches = getContainers(true).filter(c => (c.ports ?? []).some(p => p.hostPort === port));
+    const pm2Matches = getPm2Processes().filter(p => p.port === port || (info?.pid && p.pid === info.pid));
+
+    const sections: string[] = [];
+    if (info) {
+      sections.push(`[process] port :${port} pid=${info.pid ?? '—'} name=${info.process ?? '—'} source=${info.source}`);
+      if (info.command) sections.push(`[command] ${info.command}`);
+      if (info.cwd) sections.push(`[cwd] ${info.cwd}`);
+    }
+
+    for (const c of dockerMatches) {
+      const logs = getContainerLogs(c.name, lines).trim();
+      sections.push(`
+[docker:${c.name}]
+${logs || '(no logs)'}`);
+    }
+
+    for (const p of pm2Matches) {
+      const logs = getPm2Logs(p.name, lines).trim();
+      sections.push(`
+[pm2:${p.name}]
+${logs || '(no logs)'}`);
+    }
+
+    if (sections.length === 0) {
+      sections.push('No logs available for this port. It may be a host process without captured stdout/stderr.');
+    }
+
+    res.json({ success: true, port, info, logs: sections.join('\n') });
   });
 
   app.post('/api/ports/:port/kill', (req, res) => {
@@ -75,6 +173,11 @@ export function startDashboard(options: DashboardOptions = {}): void {
     const { name, action } = req.params;
     if (!['start','stop','restart','delete'].includes(action)) return res.json({ success: false, error: 'invalid' });
     res.json(pm2Action(action as any, name));
+  });
+
+  // Return JSON for unknown API routes (avoid HTML fallback confusion)
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ success: false, error: 'API route not found' });
   });
 
   // SPA fallback
@@ -125,11 +228,7 @@ function collectSnapshot() {
     pm2:       isPm2Available()    ? getPm2Processes()   : [],
     system:    getSystemInfo(),
     wsl:       detectWsl(),
-    guards:    (() => {
-      const out: Record<string, any> = {};
-      for (const [k, g] of getAllGuards()) out[k] = { running: g.isRunning(), recentEvents: g.getEventLog().slice(-20) };
-      return out;
-    })(),
+    guards: serializeGuards(),
   };
 }
 

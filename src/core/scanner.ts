@@ -158,16 +158,19 @@ function scanLinuxPorts(inodeMap: Map<number, number>): PortInfo[] {
       if (!line.trim()) continue;
       // ss -H format: State Recv-Q Send-Q Local:Port Peer:Port [Process]
       const cols = line.trim().split(/\s+/);
-      if (cols.length < 4) continue;
-
-      const addrCol = cols[3];
+      if (cols.length < 5) continue;
+      const hasNetid = /^(tcp|udp)/i.test(cols[0]);
+      const localAddrIdx = hasNetid ? 4 : 3;
+      const processStartIdx = localAddrIdx + 2;
+      const addrCol = cols[localAddrIdx];
+      if (!addrCol) continue;
       const ci = addrCol.lastIndexOf(':');
       const port = parseInt(addrCol.substring(ci + 1));
       if (!port || port <= 0 || port > 65535) continue;
 
       let pid: number | null = null;
       let processName: string | null = null;
-      const proc = cols.slice(5).join(' ');
+      const proc = cols.slice(processStartIdx).join(' ');
       const pidM = proc.match(/pid=(\d+)/);
       const nmM  = proc.match(/"([^"]+)"/);
       if (pidM) pid = parseInt(pidM[1]);
@@ -176,7 +179,7 @@ function scanLinuxPorts(inodeMap: Map<number, number>): PortInfo[] {
 
       results.push({
         port, pid, process: processName,
-        protocol: 'TCP', state: 'LISTEN',
+        protocol: /^udp/i.test(cols[0] ?? '') ? 'UDP' : 'TCP', state: 'LISTEN',
         address: addrCol, source: 'linux',
         command: pid ? getCommandForPid(pid) : undefined,
         cwd:     pid ? getCwdForPid(pid) : undefined,

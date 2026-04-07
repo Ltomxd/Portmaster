@@ -1,13 +1,16 @@
 {
   "name": "portmaster",
   "version": "1.0.0",
-  "description": "Port & process manager for WSL/Ubuntu — by Ltomxd",
+  "description": "Port & process manager for WSL/Ubuntu \u2014 by Ltomxd",
   "main": "dist/index.js",
-  "bin": { "portmaster": "./dist/index.js", "pm": "./dist/index.js" },
+  "bin": {
+    "portmaster": "./dist/index.js",
+    "pm": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dashboard": "node dist/index.js dashboard"
+    "dashboard": "npm run build && node dist/index.js dashboard"
   },
   "dependencies": {
     "chalk": "4.1.2",
