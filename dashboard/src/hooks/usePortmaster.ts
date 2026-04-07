@@ -77,7 +77,10 @@ export function usePortmaster() {
         body: JSON.stringify(payload),
       })
       const data = await safeJson(r)
-      if (!r.ok) return { success: false, error: data.error ?? `HTTP ${r.status}` }
+      if (!r.ok) {
+        const hint = r.status === 404 ? 'API /api/guards no disponible. Reinicia backend con build actualizado.' : undefined
+        return { success: false, error: data.error ?? hint ?? `HTTP ${r.status}` }
+      }
       return data
     } catch (e: any) {
       return { success: false, error: e?.message ?? 'Network error' }
@@ -92,7 +95,10 @@ export function usePortmaster() {
         body: JSON.stringify(payload),
       })
       const data = await safeJson(r)
-      if (!r.ok) return { success: false, error: data.error ?? `HTTP ${r.status}` }
+      if (!r.ok) {
+        const hint = r.status === 404 ? 'API /api/guards no disponible. Reinicia backend con build actualizado.' : undefined
+        return { success: false, error: data.error ?? hint ?? `HTTP ${r.status}` }
+      }
       return data
     } catch (e: any) {
       return { success: false, error: e?.message ?? 'Network error' }
@@ -103,7 +109,10 @@ export function usePortmaster() {
     try {
       const r = await fetch(`/api/guards/${encodeURIComponent(key)}`, { method: 'DELETE' })
       const data = await safeJson(r)
-      if (!r.ok) return { success: false, error: data.error ?? `HTTP ${r.status}` }
+      if (!r.ok) {
+        const hint = r.status === 404 ? 'API /api/guards no disponible. Reinicia backend con build actualizado.' : undefined
+        return { success: false, error: data.error ?? hint ?? `HTTP ${r.status}` }
+      }
       return data
     } catch (e: any) {
       return { success: false, error: e?.message ?? 'Network error' }
