@@ -15,6 +15,7 @@ export function GuardTab({ guards, onCreate, onUpdate, onDelete, onRefresh }: Pr
   const [portInput, setPortInput] = useState('3000')
   const [allowInput, setAllowInput] = useState('')
   const [autoKill, setAutoKill] = useState(false)
+  const [statusMsg, setStatusMsg] = useState<string | null>(null)
   const entries = Object.entries(guards)
   const typeColor: Record<string, string> = { port_appeared: 'var(--green)', port_killed: 'var(--red2)', port_disappeared: 'var(--yellow)', port_changed: 'var(--blue)' }
   const typeLabel = (t: string) => ({ port_appeared: T('appeared'), port_killed: T('killed'), port_disappeared: T('closed'), port_changed: T('changed') }[t] ?? t)
@@ -24,6 +25,7 @@ export function GuardTab({ guards, onCreate, onUpdate, onDelete, onRefresh }: Pr
   return (
     <div style={{ padding: '20px 24px' }}>
       <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.6px', color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 14 }}>{T('guard_title')}</div>
+      {statusMsg && <div style={{ marginBottom: 12, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface2)', color: 'var(--subtle)', fontSize: 12 }}>{statusMsg}</div>}
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 14, marginBottom: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr auto auto', gap: 8 }}>
@@ -34,7 +36,8 @@ export function GuardTab({ guards, onCreate, onUpdate, onDelete, onRefresh }: Pr
             onClick={async () => {
               if (!parsedPorts.length) return
               const key = `guard-${parsedPorts.join('-')}`
-              await onCreate({ key, ports: parsedPorts, autoKill, allowedProcesses: allowInput.split(',').map(v => v.trim()).filter(Boolean), intervalMs: 1500 })
+              const r = await onCreate({ key, ports: parsedPorts, autoKill, allowedProcesses: allowInput.split(',').map(v => v.trim()).filter(Boolean), intervalMs: 1500 })
+              setStatusMsg(r?.success ? `Guard creado: ${key}` : (r?.error ?? 'No se pudo crear guard'))
               onRefresh()
             }}
             style={btnStyle}
@@ -56,8 +59,8 @@ export function GuardTab({ guards, onCreate, onUpdate, onDelete, onRefresh }: Pr
               </div>
 
               <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-                <button style={miniBtn} onClick={async () => { await onUpdate(key, { autoKill: !g.autoKill }); onRefresh() }}>{g.autoKill ? 'Desactivar autoKill' : 'Activar autoKill'}</button>
-                <button style={miniBtn} onClick={async () => { await onDelete(key); onRefresh() }}>Eliminar</button>
+                <button style={miniBtn} onClick={async () => { const r = await onUpdate(key, { autoKill: !g.autoKill }); setStatusMsg(r?.success ? `Guard actualizado: ${key}` : (r?.error ?? 'No se pudo actualizar')); onRefresh() }}>{g.autoKill ? 'Desactivar autoKill' : 'Activar autoKill'}</button>
+                <button style={miniBtn} onClick={async () => { const r = await onDelete(key); setStatusMsg(r?.success ? `Guard eliminado: ${key}` : (r?.error ?? 'No se pudo eliminar')); onRefresh() }}>Eliminar</button>
               </div>
 
               <div style={{ maxHeight: 220, overflowY: 'auto' }}>
