@@ -19,17 +19,19 @@ function Dashboard() {
   const [tab, setTab] = useState<Tab>('overview')
   const [pending, setPending] = useState<{ port: number; process: string | null } | null>(null)
   const [paused, setPaused] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const counts = {
     overview: snapshot.ports.length,
-    docker:   snapshot.docker.filter(c => c.state === 'running').length,
-    pm2:      snapshot.pm2.filter(p => p.status === 'online').length,
-    guard:    Object.values(snapshot.guards).filter(g => g.running).length,
+    docker: snapshot.docker.filter(c => c.state === 'running').length,
+    pm2: snapshot.pm2.filter(p => p.status === 'online').length,
+    guard: Object.values(snapshot.guards).filter(g => g.running).length,
   }
 
   const handleKill = useCallback(async () => {
     if (!pending) return
-    const { port } = pending; setPending(null)
+    const { port } = pending
+    setPending(null)
     const r = await killPort(port)
     if (r.success) toast(`${T('killed_port')} :${port}`, 'success')
     else toast(`${T('failed_kill')} :${port} — ${r.error ?? '?'}`, 'error')
@@ -41,14 +43,16 @@ function Dashboard() {
     toast(`${active.length} ${T('killed_processes')}`, 'success')
   }, [snapshot.ports, killPort, toast, T])
 
-  const handleDocker = useCallback(async (name: string, action: 'start'|'stop'|'restart') => {
+  const handleDocker = useCallback(async (name: string, action: 'start' | 'stop' | 'restart') => {
     const r = await dockerAction(name, action)
-    if (r.success) toast(`${name} ${action}ed`, 'success'); else toast(r.error ?? 'Failed', 'error')
+    if (r.success) toast(`${name} ${action}ed`, 'success')
+    else toast(r.error ?? 'Failed', 'error')
   }, [dockerAction, toast])
 
-  const handlePm2 = useCallback(async (name: string, action: 'start'|'stop'|'restart') => {
+  const handlePm2 = useCallback(async (name: string, action: 'start' | 'stop' | 'restart') => {
     const r = await pm2Action(name, action)
-    if (r.success) toast(`PM2 ${name} ${action}ed`, 'success'); else toast(r.error ?? 'Failed', 'error')
+    if (r.success) toast(`PM2 ${name} ${action}ed`, 'success')
+    else toast(r.error ?? 'Failed', 'error')
   }, [pm2Action, toast])
 
   const subtitles: Record<Tab, string> = {
@@ -61,22 +65,26 @@ function Dashboard() {
   const ok = connState === 'connected'
 
   return (
-    <div style={{ display: 'flex', height: '100%', background: 'var(--bg)' }}>
-      <Sidebar activeTab={tab} onTabChange={t => setTab(t)} counts={counts} wsl={snapshot.wsl} />
+    <div className="app-shell">
+      <Sidebar
+        activeTab={tab}
+        onTabChange={t => { setTab(t); setSidebarOpen(false) }}
+        counts={counts}
+        wsl={snapshot.wsl}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-        {/* Header */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 24px', height: 56, borderBottom: '1px solid var(--border)',
-          background: 'var(--surface)', flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <span style={{ fontWeight: 700, fontSize: 16 }}>{titles[tab]}</span>
-            <span style={{ color: 'var(--muted)', fontSize: 13 }}>{subtitles[tab]}</span>
+      <div className="app-main">
+        <div className="app-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <button className="app-hbtn app-hbtn-mobile" onClick={() => setSidebarOpen(true)}>☰</button>
+            <div className="header-title-wrap">
+              <span style={{ fontWeight: 700, fontSize: 16 }}>{titles[tab]}</span>
+              <span style={{ color: 'var(--muted)', fontSize: 13 }}>{subtitles[tab]}</span>
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Connection badge */}
+          <div className="header-actions">
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: ok ? 'var(--green)' : 'var(--muted)' }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: ok ? 'var(--green)' : 'var(--yellow)', display: 'inline-block', animation: ok ? 'pulse 2s infinite' : 'none' }} />
               {ok ? T('connected') : connState === 'reconnecting' ? T('reconnecting') : T('connecting')}
@@ -86,16 +94,14 @@ function Dashboard() {
           </div>
         </div>
 
-        {/* Content */}
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           {tab === 'overview' && <Overview snapshot={snapshot} onKill={(p, n) => setPending({ port: p, process: n })} onKillAll={handleKillAll} />}
-          {tab === 'docker'   && <DockerTab containers={snapshot.docker} onAction={handleDocker} />}
-          {tab === 'pm2'      && <Pm2Tab processes={snapshot.pm2} onAction={handlePm2} />}
-          {tab === 'guard'    && <GuardTab guards={snapshot.guards} />}
+          {tab === 'docker' && <DockerTab containers={snapshot.docker} onAction={handleDocker} />}
+          {tab === 'pm2' && <Pm2Tab processes={snapshot.pm2} onAction={handlePm2} />}
+          {tab === 'guard' && <GuardTab guards={snapshot.guards} />}
         </div>
 
-        {/* Footer */}
-        <div style={{ borderTop: '1px solid var(--border)', padding: '6px 24px', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>
+        <div className="app-footer">
           <span>🦝 Portmaster — WSL/Ubuntu Port Manager</span>
           <a href="https://github.com/Ltomxd/Portmaster" target="_blank" rel="noreferrer" style={{ color: 'var(--red2)', textDecoration: 'none', fontWeight: 600 }}>
             github.com/Ltomxd/Portmaster
@@ -111,14 +117,11 @@ function Dashboard() {
 
 function HBtn({ onClick, label, primary }: { onClick: () => void; label: string; primary?: boolean }) {
   return (
-    <button onClick={onClick} style={{
+    <button onClick={onClick} className="app-hbtn" style={{
       background: primary ? 'var(--red-glow)' : 'transparent',
       border: `1px solid ${primary ? 'rgba(229,62,62,.35)' : 'var(--border)'}`,
       color: primary ? 'var(--red2)' : 'var(--muted)',
-      padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: 500, transition: 'all .15s',
     }}
-      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--red2)'; (e.currentTarget as HTMLElement).style.color = 'var(--red2)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = primary ? 'rgba(229,62,62,.35)' : 'var(--border)'; (e.currentTarget as HTMLElement).style.color = primary ? 'var(--red2)' : 'var(--muted)' }}
     >{label}</button>
   )
 }
