@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────
+#  Portmaster 🦝  docker-compose
+#  Auto-start: docker compose up -d
+#  Dashboard:  http://localhost:4321
+# ─────────────────────────────────────────────────────────────
+version: "3.8"
+
+services:
+  portmaster:
+    build: .
+    image: portmaster:latest
+    container_name: portmaster
+    restart: always          # auto-start on machine boot
+    ports:
+      - "4321:4321"
+    volumes:
+      # Read /proc so the scanner can detect processes
+      - /proc:/proc:ro
+      # Docker socket so portmaster can see other containers
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=production
+    # Limit resource usage
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"

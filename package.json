@@ -1,0 +1,27 @@
+{
+  "name": "portmaster",
+  "version": "1.0.0",
+  "description": "Port & process manager for WSL/Ubuntu — by Ltomxd",
+  "main": "dist/index.js",
+  "bin": { "portmaster": "./dist/index.js", "pm": "./dist/index.js" },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dashboard": "node dist/index.js dashboard"
+  },
+  "dependencies": {
+    "chalk": "4.1.2",
+    "cli-table3": "^0.6.5",
+    "commander": "^12.1.0",
+    "express": "^4.18.2",
+    "js-yaml": "^4.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.12.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.4.5"
+  }
+}
