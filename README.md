@@ -104,6 +104,12 @@ The `restart: always` policy ensures Portmaster starts automatically when your m
 ```
 http://localhost:4321
 ```
+```
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup
+pm2 save
+```
 
 **Overview tab:**
 - Stats bar: Total Processes · Active Ports · Docker · Port Conflicts · System Load
