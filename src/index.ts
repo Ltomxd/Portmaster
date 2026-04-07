@@ -253,7 +253,7 @@ program
   .command('dashboard')
   .alias('dash')
   .description('Start the web dashboard')
-  .option('-p, --port <port>', 'Dashboard port', '4321')
+  .option('-p, --port <port>', 'Dashboard port', '54321')
   .option('--host <host>', 'Dashboard host (use 0.0.0.0 for WSL)', '0.0.0.0')
   .option('--interval <ms>', 'Refresh interval in ms', '3000')
   .action((opts) => {

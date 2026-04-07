@@ -38,17 +38,13 @@ function serializeGuards() {
 let prevCpuTotal = 0, prevCpuIdle = 0;
 
 export function startDashboard(options: DashboardOptions = {}): void {
-  const requestedPort = options.port ?? 4321;
-  let PORT = requestedPort;
+  const PORT = options.port ?? 54321;
   const HOST = options.host ?? '0.0.0.0';
 
   if (isPortInUse(PORT)) {
-    const start = PORT;
-    while (PORT < start + 50 && isPortInUse(PORT)) PORT++;
-    if (PORT !== start) {
-      console.log(`  ⚠ Port ${start} in use. Switching dashboard port to ${PORT}.`);
-    }
+    throw new Error(`Dashboard port ${PORT} is already in use. Stop the existing service or run with --port <free_port>.`);
   }
+
   const INTERVAL = options.refreshInterval ?? 3000;
 
   const app = express();
