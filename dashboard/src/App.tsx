@@ -13,7 +13,7 @@ import { ToastList } from './components/ToastList'
 type Tab = 'overview' | 'docker' | 'pm2' | 'guard'
 
 function Dashboard() {
-  const { snapshot, connState, refresh, killPort, dockerAction, pm2Action } = usePortmaster()
+  const { snapshot, connState, refresh, killPort, dockerAction, pm2Action, createGuard, updateGuard, deleteGuard } = usePortmaster()
   const { toasts, toast, dismiss } = useToast()
   const { T } = useLang()
   const [tab, setTab] = useState<Tab>('overview')
@@ -55,6 +55,21 @@ function Dashboard() {
     else toast(r.error ?? 'Failed', 'error')
   }, [pm2Action, toast])
 
+
+  const handleProtectPort = useCallback(async (port: number, process: string | null) => {
+    const key = `port-${port}`
+    const result = await createGuard({
+      key,
+      ports: [port],
+      autoKill: false,
+      allowedProcesses: process ? [process] : [],
+      intervalMs: 1500,
+    })
+    if (result.success) toast(`Guard :${port} created`, 'success')
+    else toast(result.error ?? 'Guard error', 'error')
+    refresh()
+  }, [createGuard, toast, refresh])
+
   const subtitles: Record<Tab, string> = {
     overview: T('subtitle_overview'), docker: T('subtitle_docker'),
     pm2: T('subtitle_pm2'), guard: T('subtitle_guard'),
@@ -95,10 +110,10 @@ function Dashboard() {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-          {tab === 'overview' && <Overview snapshot={snapshot} onKill={(p, n) => setPending({ port: p, process: n })} onKillAll={handleKillAll} />}
+          {tab === 'overview' && <Overview snapshot={snapshot} onKill={(p, n) => setPending({ port: p, process: n })} onKillAll={handleKillAll} onProtect={handleProtectPort} />}
           {tab === 'docker' && <DockerTab containers={snapshot.docker} onAction={handleDocker} />}
           {tab === 'pm2' && <Pm2Tab processes={snapshot.pm2} onAction={handlePm2} />}
-          {tab === 'guard' && <GuardTab guards={snapshot.guards} />}
+          {tab === 'guard' && <GuardTab guards={snapshot.guards} onCreate={createGuard} onUpdate={updateGuard} onDelete={deleteGuard} onRefresh={refresh} />}
         </div>
 
         <div className="app-footer">

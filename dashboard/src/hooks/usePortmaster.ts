@@ -59,5 +59,28 @@ export function usePortmaster() {
     return r.json()
   }, [])
 
-  return { snapshot, connState, refresh, killPort, dockerAction, pm2Action }
+  const createGuard = useCallback(async (payload: { key: string; ports: number[]; autoKill?: boolean; allowedProcesses?: string[]; intervalMs?: number }) => {
+    const r = await fetch('/api/guards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    return r.json()
+  }, [])
+
+  const updateGuard = useCallback(async (key: string, payload: { ports?: number[]; autoKill?: boolean; allowedProcesses?: string[]; intervalMs?: number }) => {
+    const r = await fetch(`/api/guards/${encodeURIComponent(key)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    return r.json()
+  }, [])
+
+  const deleteGuard = useCallback(async (key: string) => {
+    const r = await fetch(`/api/guards/${encodeURIComponent(key)}`, { method: 'DELETE' })
+    return r.json()
+  }, [])
+
+  return { snapshot, connState, refresh, killPort, dockerAction, pm2Action, createGuard, updateGuard, deleteGuard }
 }

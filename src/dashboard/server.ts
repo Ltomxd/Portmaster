@@ -8,7 +8,7 @@ import { scanPorts } from '../core/scanner';
 import { getContainers, isDockerAvailable, stopContainer, startContainer, restartContainer, getContainerLogs } from '../core/docker';
 import { getPm2Processes, isPm2Available, pm2Action } from '../core/pm2';
 import { killPort } from '../core/killer';
-import { getAllGuards } from '../core/guard';
+import { getAllGuards, startGuard, stopGuard } from '../core/guard';
 import { detectWsl } from '../core/wsl';
 
 export interface DashboardOptions {
@@ -51,9 +51,53 @@ export function startDashboard(options: DashboardOptions = {}): void {
   app.get('/api/guards', (_req, res) => {
     const out: Record<string, any> = {};
     for (const [k, g] of getAllGuards()) {
-      out[k] = { running: g.isRunning(), recentEvents: g.getEventLog().slice(-20) };
+      const options = g.getOptions();
+      out[k] = {
+        running: g.isRunning(),
+        recentEvents: g.getEventLog().slice(-20),
+        ports: options.ports,
+        autoKill: options.autoKill,
+        allowedProcesses: options.allowedProcesses,
+        intervalMs: options.intervalMs,
+      };
     }
     res.json(out);
+  });
+
+  app.post('/api/guards', (req, res) => {
+    const { key, ports, autoKill, allowedProcesses, intervalMs } = req.body ?? {};
+    if (!key || !Array.isArray(ports) || ports.length === 0) {
+      return res.status(400).json({ success: false, error: 'key and ports are required' });
+    }
+    startGuard(String(key), {
+      ports: ports.map((p: any) => parseInt(String(p))).filter((p: number) => p > 0 && p <= 65535),
+      autoKill: Boolean(autoKill),
+      allowedProcesses: Array.isArray(allowedProcesses) ? allowedProcesses.map((v: any) => String(v)).filter(Boolean) : [],
+      intervalMs: intervalMs ? parseInt(String(intervalMs)) : 1500,
+    });
+    res.json({ success: true });
+  });
+
+  app.patch('/api/guards/:key', (req, res) => {
+    const key = req.params.key;
+    const guard = getAllGuards().get(key);
+    if (!guard) return res.status(404).json({ success: false, error: 'guard not found' });
+
+    const current = guard.getOptions();
+    const body = req.body ?? {};
+    startGuard(key, {
+      ports: Array.isArray(body.ports) ? body.ports.map((p: any) => parseInt(String(p))).filter((p: number) => p > 0 && p <= 65535) : current.ports,
+      autoKill: typeof body.autoKill === 'boolean' ? body.autoKill : current.autoKill,
+      allowedProcesses: Array.isArray(body.allowedProcesses) ? body.allowedProcesses.map((v: any) => String(v)).filter(Boolean) : current.allowedProcesses,
+      intervalMs: body.intervalMs ? parseInt(String(body.intervalMs)) : current.intervalMs,
+    });
+
+    res.json({ success: true });
+  });
+
+  app.delete('/api/guards/:key', (req, res) => {
+    stopGuard(req.params.key);
+    res.json({ success: true });
   });
 
   app.post('/api/ports/:port/kill', (req, res) => {
@@ -127,7 +171,17 @@ function collectSnapshot() {
     wsl:       detectWsl(),
     guards:    (() => {
       const out: Record<string, any> = {};
-      for (const [k, g] of getAllGuards()) out[k] = { running: g.isRunning(), recentEvents: g.getEventLog().slice(-20) };
+      for (const [k, g] of getAllGuards()) {
+        const options = g.getOptions();
+        out[k] = {
+          running: g.isRunning(),
+          recentEvents: g.getEventLog().slice(-20),
+          ports: options.ports,
+          autoKill: options.autoKill,
+          allowedProcesses: options.allowedProcesses,
+          intervalMs: options.intervalMs,
+        };
+      }
       return out;
     })(),
   };

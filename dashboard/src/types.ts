@@ -84,6 +84,10 @@ export interface GuardEvent {
 export interface GuardStatus {
   running: boolean
   recentEvents: GuardEvent[]
+  ports?: number[]
+  autoKill?: boolean
+  allowedProcesses?: string[]
+  intervalMs?: number
 }
 
 export interface Snapshot {
