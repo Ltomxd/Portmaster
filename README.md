@@ -1,7 +1,7 @@
 <div align="center">
   <img src="dashboard/src/assets/raccoon.jpg" width="120" style="border-radius:50%"/>
   <h1>🦝 Portmaster</h1>
-  <p><strong>Port & Process Manager for WSL / Ubuntu</strong></p>
+  <p><strong>Port & Process Manager for WSL / Ubuntu /windows</strong></p>
   <p>
     <a href="https://github.com/Ltomxd/Portmaster">github.com/Ltomxd/Portmaster</a>
   </p>
