@@ -4,7 +4,7 @@ import * as path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { execSync } from 'child_process';
 import { readFileSync, accessSync } from 'fs';
-import { scanPorts } from '../core/scanner';
+import { scanPorts, isPortInUse } from '../core/scanner';
 import { getContainers, isDockerAvailable, stopContainer, startContainer, restartContainer, getContainerLogs } from '../core/docker';
 import { getPm2Processes, isPm2Available, pm2Action } from '../core/pm2';
 import { killPort } from '../core/killer';
@@ -38,8 +38,17 @@ function serializeGuards() {
 let prevCpuTotal = 0, prevCpuIdle = 0;
 
 export function startDashboard(options: DashboardOptions = {}): void {
-  const PORT = options.port ?? 4321;
+  const requestedPort = options.port ?? 4321;
+  let PORT = requestedPort;
   const HOST = options.host ?? '0.0.0.0';
+
+  if (isPortInUse(PORT)) {
+    const start = PORT;
+    while (PORT < start + 50 && isPortInUse(PORT)) PORT++;
+    if (PORT !== start) {
+      console.log(`  ⚠ Port ${start} in use. Switching dashboard port to ${PORT}.`);
+    }
+  }
   const INTERVAL = options.refreshInterval ?? 3000;
 
   const app = express();
