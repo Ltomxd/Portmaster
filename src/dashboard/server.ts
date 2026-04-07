@@ -4,9 +4,9 @@ import * as path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { execSync } from 'child_process';
 import { readFileSync, accessSync } from 'fs';
-import { scanPorts, isPortInUse } from '../core/scanner';
+import { scanPorts, isPortInUse, getPortInfo } from '../core/scanner';
 import { getContainers, isDockerAvailable, stopContainer, startContainer, restartContainer, getContainerLogs } from '../core/docker';
-import { getPm2Processes, isPm2Available, pm2Action } from '../core/pm2';
+import { getPm2Processes, isPm2Available, pm2Action, getPm2Logs } from '../core/pm2';
 import { killPort } from '../core/killer';
 import { getAllGuards, startGuard, stopGuard } from '../core/guard';
 import { detectWsl } from '../core/wsl';
@@ -114,6 +114,44 @@ export function startDashboard(options: DashboardOptions = {}): void {
   app.delete('/api/guards/:key', (req, res) => {
     stopGuard(req.params.key);
     res.json({ success: true });
+  });
+
+
+  app.get('/api/ports/:port/logs', (req, res) => {
+    const port = parseInt(req.params.port);
+    const lines = parseInt(String(req.query.lines ?? '80'));
+    if (!port || port <= 0) return res.status(400).json({ success: false, error: 'invalid port' });
+
+    const info = getPortInfo(port);
+    const dockerMatches = getContainers(true).filter(c => (c.ports ?? []).some(p => p.hostPort === port));
+    const pm2Matches = getPm2Processes().filter(p => p.port === port || (info?.pid && p.pid === info.pid));
+
+    const sections: string[] = [];
+    if (info) {
+      sections.push(`[process] port :${port} pid=${info.pid ?? '—'} name=${info.process ?? '—'} source=${info.source}`);
+      if (info.command) sections.push(`[command] ${info.command}`);
+      if (info.cwd) sections.push(`[cwd] ${info.cwd}`);
+    }
+
+    for (const c of dockerMatches) {
+      const logs = getContainerLogs(c.name, lines).trim();
+      sections.push(`
+[docker:${c.name}]
+${logs || '(no logs)'}`);
+    }
+
+    for (const p of pm2Matches) {
+      const logs = getPm2Logs(p.name, lines).trim();
+      sections.push(`
+[pm2:${p.name}]
+${logs || '(no logs)'}`);
+    }
+
+    if (sections.length === 0) {
+      sections.push('No logs available for this port. It may be a host process without captured stdout/stderr.');
+    }
+
+    res.json({ success: true, port, info, logs: sections.join('\n') });
   });
 
   app.post('/api/ports/:port/kill', (req, res) => {
