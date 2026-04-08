@@ -129,5 +129,7 @@ pm2 save
 
 
 ## License
-
+> Inspired by [port-kill](https://github.com/treadiehq/port-kill)
+> by treadiehq. This is an independent reimplementation built from
+> scratch in a different stack, targeting WSL/Linux environments.
 MIT — Made by [Ltomxd](https://github.com/Ltomxd)
