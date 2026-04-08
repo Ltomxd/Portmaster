@@ -1,4 +1,4 @@
-<img width="1920" height="1004" alt="image" src="https://github.com/user-attachments/assets/e2be1b14-ed4b-455f-b32f-dac537e5ec8a" /><div align="center">
+
   <img src="dashboard/src/assets/raccoon.jpg" width="120" style="border-radius:50%"/>
   <h1>🦝 Portmaster</h1>
   <p><strong>Port & Process Manager for WSL / Ubuntu /windows</strong></p>
@@ -122,6 +122,7 @@ pm2 save
 
 ---
 <img width="1920" height="992" alt="{5B005C77-655E-4F99-832F-FF6A28F605DC}" src="https://github.com/user-attachments/assets/8afa26ca-554c-4aed-a6d7-bc1a273eee55" />
+<img width="1920" height="851" alt="{E6174E2F-69C9-40E9-8361-C2859787D42E}" src="https://github.com/user-attachments/assets/46dc6af6-b83d-4eb6-be0e-50d6b5c13202" />
 <img width="1920" height="991" alt="{CE6D5C5F-831F-48AA-9AAA-9CFBA5C88B68}" src="https://github.com/user-attachments/assets/b1547e0c-d47f-40b7-bcae-d66040e21e45" />
 <img width="1920" height="1004" alt="image" src="https://github.com/user-attachments/assets/420eacae-2085-4a25-a97d-b6e347e7d930" />
 
