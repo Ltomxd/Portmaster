@@ -122,10 +122,7 @@ pm2 save
 
 ---
 <img width="1920" height="992" alt="{5B005C77-655E-4F99-832F-FF6A28F605DC}" src="https://github.com/user-attachments/assets/8afa26ca-554c-4aed-a6d7-bc1a273eee55" />
-<img width="1664" height="915" alt="{E3C791D1-1538-4093-956E-FD95DAEDC613}" src="https://github.com/user-attachments/assets/91f8deb5-1b98-48dc-949c-d21506917e99" />
-
 <img width="1920" height="991" alt="{CE6D5C5F-831F-48AA-9AAA-9CFBA5C88B68}" src="https://github.com/user-attachments/assets/b1547e0c-d47f-40b7-bcae-d66040e21e45" />
-
 <img width="1920" height="1004" alt="image" src="https://github.com/user-attachments/assets/420eacae-2085-4a25-a97d-b6e347e7d930" />
 
 
