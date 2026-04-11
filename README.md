@@ -110,6 +110,7 @@ pm2 start ecosystem.config.cjs
 pm2 save
 pm2 startup
 pm2 save
+http://localhost:54321
 ```
 
 **Overview tab:**
