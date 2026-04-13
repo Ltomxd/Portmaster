@@ -111,7 +111,23 @@ pm2 save
 pm2 startup
 pm2 save
 http://localhost:54321
+
+"estar wsl "
+sudo env PATH="$PATH:/home/kira/.nvm/versions/node/v25.2.1/bin" /home/kira/.nvm/versions/node/v25.2.1/lib/node_modules/pm2/bin/pm2 startup systemd -u kira --hp /home/kira
+
+sudo nano /etc/wsl.conf
+
+[boot]
+systemd=true
+
+PowerShell: wsl --shutdown
+
+pm2 status
 ```
+<img width="1231" height="211" alt="{B721B5D6-17EC-43F1-97F7-9D0E031B43D1}" src="https://github.com/user-attachments/assets/7235ddac-1622-4065-9b33-64253198e09b" />
+
+
+<img width="1514" height="205" alt="{938B1DD6-A54B-4E8F-854D-51A8E1C79F18}" src="https://github.com/user-attachments/assets/7b1b2868-1496-493f-a59c-237a897c0676" />
 
 **Overview tab:**
 - Stats bar: Total Processes · Active Ports · Docker · Port Conflicts · System Load
