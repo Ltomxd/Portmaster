@@ -2,7 +2,9 @@ import express from 'express';
 import * as http from 'http';
 import * as path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
-import { execSync } from 'child_process';
+import { execSync, spawn, ChildProcessByStdio } from 'child_process';
+import type { Readable } from 'stream';
+import type { Socket } from 'net';
 import { readFileSync, accessSync } from 'fs';
 import { scanPorts, isPortInUse, getPortInfo } from '../core/scanner';
 import { getContainers, isDockerAvailable, stopContainer, startContainer, restartContainer, getContainerLogs } from '../core/docker';
@@ -10,6 +12,12 @@ import { getPm2Processes, isPm2Available, pm2Action, getPm2Logs } from '../core/
 import { killPort } from '../core/killer';
 import { getAllGuards, startGuard, stopGuard } from '../core/guard';
 import { detectWsl } from '../core/wsl';
+import { getProcessSecurity, getConnectionsForPort, getSecurityLogs, resolveHostLogPath } from '../core/inspect';
+import { adoptPort, getManagedProcess, getManagedPortMap } from '../core/supervisor';
+import { stripAnsi } from '../core/ansi';
+import { getConfig, setProjectsRoot } from '../core/config';
+import { browseProjects, resolveProjectPath } from '../core/projects';
+import { getOrCreateShell, killShellSession, listActiveShellPaths } from '../core/terminal';
 
 export interface DashboardOptions {
   port?: number;
@@ -154,6 +162,53 @@ ${logs || '(no logs)'}`);
     res.json({ success: true, port, info, logs: sections.join('\n') });
   });
 
+  app.get('/api/inspect/:pid', (req, res) => {
+    const pid = parseInt(req.params.pid);
+    const port = parseInt(String(req.query.port ?? ''));
+    if (!pid || pid <= 0) return res.status(400).json({ success: false, error: 'invalid pid' });
+    if (!port || port <= 0) return res.status(400).json({ success: false, error: 'invalid port' });
+
+    const process_ = getProcessSecurity(pid);
+    const connections = getConnectionsForPort(port);
+    const logs = getSecurityLogs(pid, process_.name, 100);
+
+    res.json({ success: true, pid, port, process: process_, connections, logs });
+  });
+
+  app.post('/api/ports/:port/adopt', async (req, res) => {
+    const port = parseInt(req.params.port);
+    if (!port || port <= 0) return res.status(400).json({ success: false, error: 'invalid port' });
+    const result = await adoptPort(port);
+    res.json(result);
+  });
+
+  app.get('/api/projects/root', (_req, res) => {
+    res.json({ success: true, projectsRoot: getConfig().projectsRoot });
+  });
+
+  app.post('/api/projects/root', (req, res) => {
+    const p = String(req.body?.path ?? '').trim();
+    if (!p) return res.status(400).json({ success: false, error: 'path is required' });
+    res.json(setProjectsRoot(p));
+  });
+
+  app.get('/api/projects/browse', (req, res) => {
+    res.json(browseProjects(String(req.query.path ?? '')));
+  });
+
+  app.get('/api/terminal/sessions', (_req, res) => {
+    const root = getConfig().projectsRoot;
+    const paths = root ? listActiveShellPaths().map(p => path.relative(root, p)) : [];
+    res.json({ success: true, paths });
+  });
+
+  app.post('/api/terminal/kill', (req, res) => {
+    const relPath = String(req.body?.cwd ?? '');
+    const cwd = resolveProjectPath(relPath);
+    if (!cwd) return res.status(400).json({ success: false, error: 'invalid path' });
+    res.json({ success: killShellSession(cwd) });
+  });
+
   app.post('/api/ports/:port/kill', (req, res) => {
     const result = killPort(parseInt(req.params.port));
     res.json(result);
@@ -190,8 +245,21 @@ ${logs || '(no logs)'}`);
   });
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
+  // Three logical channels share one HTTP server: the snapshot broadcast
+  // (root path), on-demand live log streams (/ws-logs/:kind/:id), and
+  // interactive terminal sessions (/ws-terminal). All use `noServer: true`
+  // and are dispatched manually from a single 'upgrade' listener —
+  // attaching multiple `{ server }` WebSocketServers directly would race to
+  // handle the same upgrade event.
   const server = http.createServer(app);
-  const wss = new WebSocketServer({ server });
+  // perMessageDeflate is on by default in `ws` — it costs a real zlib
+  // deflate/inflate call per message for essentially no payoff on traffic
+  // this small (a keystroke, a snapshot diff), and adds latency on exactly
+  // the connection (the terminal) where that matters most. Everything here
+  // is localhost-only, so there's no bandwidth to trade for it.
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+  const logsWss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+  const terminalWss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
   const clients = new Set<WebSocket>();
 
   wss.on('connection', ws => {
@@ -200,6 +268,28 @@ ${logs || '(no logs)'}`);
     try { ws.send(JSON.stringify(collectSnapshot())); } catch {}
     ws.on('close', () => clients.delete(ws));
     ws.on('error', () => clients.delete(ws));
+  });
+
+  logsWss.on('connection', (ws, req: http.IncomingMessage) => handleLogSocket(ws, req));
+  terminalWss.on('connection', (ws, req: http.IncomingMessage) => handleTerminalSocket(ws, req));
+
+  server.on('upgrade', (req, socket, head) => {
+    // Nagle's algorithm batches small TCP writes to wait for more data (or
+    // an ACK) before sending — great for throughput, bad for anything
+    // interactive. Every keystroke in the terminal is its own tiny packet.
+    // Combined with delayed ACKs on the other end, that pairing is a
+    // textbook cause of the ~40ms+ stutter this produces; the standard fix
+    // for any latency-sensitive socket (terminals, games, chat) is to
+    // disable it.
+    (socket as Socket).setNoDelay(true);
+    const pathname = (req.url ?? '/').split('?')[0];
+    if (pathname.startsWith('/ws-logs/')) {
+      logsWss.handleUpgrade(req, socket, head, ws => logsWss.emit('connection', ws, req));
+    } else if (pathname === '/ws-terminal') {
+      terminalWss.handleUpgrade(req, socket, head, ws => terminalWss.emit('connection', ws, req));
+    } else {
+      wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+    }
   });
 
   function broadcast(data: unknown) {
@@ -219,6 +309,188 @@ ${logs || '(no logs)'}`);
   });
 }
 
+// ── Live log streaming (docker / pm2 / journalctl -f / tail -f) ─────────────
+
+function sendLog(ws: WebSocket, type: 'status' | 'line' | 'error', data: string) {
+  if (ws.readyState === WebSocket.OPEN) {
+    try { ws.send(JSON.stringify({ type, data })); } catch {}
+  }
+}
+
+function handleLogSocket(ws: WebSocket, req: http.IncomingMessage) {
+  // URL shape: /ws-logs/<kind>/<id>  where kind ∈ docker|pm2|journal|managed
+  const pathname = (req.url ?? '/').split('?')[0];
+  const segments = pathname.split('/').filter(Boolean); // ['ws-logs', kind, id]
+  const kind = segments[1];
+  const idRaw = decodeURIComponent(segments[2] ?? '');
+
+  if (kind === 'managed') {
+    // Adopted processes are children of THIS server process — no subprocess
+    // to spawn, just tap the pipe we're already holding.
+    const pid = parseInt(idRaw);
+    const proc = pid ? getManagedProcess(pid) : undefined;
+    if (!proc) { sendLog(ws, 'error', 'Managed process not found (it may have exited)'); ws.close(); return; }
+
+    sendLog(ws, 'status', 'connecting:managed:' + idRaw);
+    sendLog(ws, 'status', 'live:managed');
+    if (proc.buffer.length) sendLog(ws, 'line', proc.buffer.join('\n'));
+
+    const onData = (chunk: Buffer) => sendLog(ws, 'line', stripAnsi(chunk.toString('utf8')));
+    const onExit = () => { sendLog(ws, 'status', 'closed'); try { ws.close(); } catch {} };
+    proc.child.stdout.on('data', onData);
+    proc.child.stderr.on('data', onData);
+    proc.child.once('exit', onExit);
+
+    const cleanup = () => {
+      proc.child.stdout.off('data', onData);
+      proc.child.stderr.off('data', onData);
+      proc.child.off('exit', onExit);
+    };
+    ws.on('close', cleanup);
+    ws.on('error', cleanup);
+    return;
+  }
+
+  let cmd: string;
+  let args: string[];
+  let sourceNote: string | undefined;
+
+  if (kind === 'docker') {
+    const exists = getContainers(true).some(c => c.name === idRaw || c.id === idRaw);
+    if (!exists) { sendLog(ws, 'error', `Container not found: ${idRaw}`); ws.close(); return; }
+    cmd = 'docker'; args = ['logs', '-f', '--tail', '150', idRaw];
+  } else if (kind === 'pm2') {
+    const exists = getPm2Processes().some(p => p.name === idRaw || String(p.id) === idRaw);
+    if (!exists) { sendLog(ws, 'error', `PM2 process not found: ${idRaw}`); ws.close(); return; }
+    cmd = 'pm2'; args = ['logs', idRaw, '--lines', '100'];
+  } else if (kind === 'journal') {
+    const pid = parseInt(idRaw);
+    if (!pid || pid <= 0) { sendLog(ws, 'error', 'invalid pid'); ws.close(); return; }
+    // A hand-run dev server almost never logs to journald — its stdout/stderr
+    // usually go to a terminal or a redirected file. Prefer tailing that real
+    // file when we can find one; journalctl is the fallback, not the default.
+    const logPath = resolveHostLogPath(pid);
+    if (logPath) {
+      cmd = 'tail'; args = ['-f', '-n', '80', logPath]; sourceNote = `file:${logPath}`;
+    } else {
+      cmd = 'journalctl'; args = [`_PID=${pid}`, '-f', '-n', '80', '-o', 'short-iso']; sourceNote = 'journalctl';
+    }
+  } else {
+    sendLog(ws, 'error', `Unknown log source: ${kind}`);
+    ws.close();
+    return;
+  }
+
+  sendLog(ws, 'status', `connecting:${kind}:${idRaw}`);
+
+  let child: ChildProcessByStdio<null, Readable, Readable>;
+  try {
+    child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e: any) {
+    sendLog(ws, 'error', `${cmd} unavailable: ${e.message}`);
+    ws.close();
+    return;
+  }
+
+  let started = false;
+  const onData = (chunk: Buffer) => { started = true; sendLog(ws, 'line', stripAnsi(chunk.toString('utf8'))); };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+  child.on('spawn', () => sendLog(ws, 'status', sourceNote ? `live:${sourceNote}` : 'live'));
+  child.on('error', (err: any) => {
+    sendLog(ws, 'error', `${cmd} unavailable: ${err.message}`);
+    try { ws.close(); } catch {}
+  });
+  child.on('exit', code => {
+    if (!started && code !== 0) sendLog(ws, 'error', `${cmd} exited (code ${code}) — no output`);
+    sendLog(ws, 'status', 'closed');
+    try { ws.close(); } catch {}
+  });
+
+  const cleanup = () => { try { child.kill(); } catch {} };
+  ws.on('close', cleanup);
+  ws.on('error', cleanup);
+}
+
+// ── Interactive terminal (PTY) ───────────────────────────────────────────────
+// URL: /ws-terminal?cwd=<path relative to the configured projects root>&cols&rows
+// Protocol: client -> {type:'input',data} | {type:'resize',cols,rows}  (JSON text frames)
+//           server -> raw binary frames = PTY output; JSON text frames for
+//                      {type:'status',data} | {type:'error',data} | {type:'exit',code}
+// The PTY is keyed by cwd and outlives any single connection — closing this
+// socket (tab closed, dialog minimized, page reloaded) only detaches this
+// viewer. A shell running `pnpm run dev` keeps running regardless; only an
+// explicit POST /api/terminal/kill ends it. Reattaching replays the buffered
+// output so nothing that happened while disconnected is lost.
+function handleTerminalSocket(ws: WebSocket, req: http.IncomingMessage) {
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const relPath = url.searchParams.get('cwd') ?? '';
+  const cols = parseInt(url.searchParams.get('cols') ?? '80') || 80;
+  const rows = parseInt(url.searchParams.get('rows') ?? '24') || 24;
+
+  const sendMsg = (type: string, data: unknown) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type, data })); } catch {}
+    }
+  };
+  // Output is the hot path — a single fast-scrolling command can emit
+  // hundreds of chunks a second. Sending it as a raw binary frame skips
+  // JSON.stringify/parse (and its string-escaping cost) on both ends;
+  // the client tells frames apart by type (ArrayBuffer vs. text), so no
+  // envelope is needed at all. Control messages stay JSON since they're rare.
+  const sendOutput = (data: string) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.send(Buffer.from(data, 'utf8')); } catch {}
+    }
+  };
+
+  const cwd = resolveProjectPath(relPath);
+  if (!cwd) {
+    sendMsg('error', 'Invalid or out-of-root path');
+    ws.close();
+    return;
+  }
+
+  let result;
+  try {
+    result = getOrCreateShell(cwd, cols, rows);
+  } catch (e: any) {
+    sendMsg('error', `Could not start terminal: ${e.message}`);
+    ws.close();
+    return;
+  }
+  const { session, isNew } = result;
+
+  if (session.buffer) sendOutput(session.buffer);
+  sendMsg('status', isNew ? 'ready' : 'reattached');
+
+  const onData = (data: string) => sendOutput(data);
+  const onExit = ({ exitCode }: { exitCode: number }) => {
+    sendMsg('exit', exitCode);
+    try { ws.close(); } catch {}
+  };
+  const dataSub = session.proc.onData(onData);
+  const exitSub = session.proc.onExit(onExit);
+
+  ws.on('message', raw => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'input' && typeof msg.data === 'string') session.proc.write(msg.data);
+      else if (msg.type === 'resize') {
+        const c = Math.max(1, parseInt(msg.cols) || 80);
+        const r = Math.max(1, parseInt(msg.rows) || 24);
+        session.proc.resize(c, r);
+        session.cols = c; session.rows = r;
+      }
+    } catch {}
+  });
+
+  // Detaching never kills the shell — only this connection's own listeners.
+  const cleanup = () => { dataSub.dispose(); exitSub.dispose(); };
+  ws.on('close', cleanup);
+  ws.on('error', cleanup);
+}
+
 // ── Data collection ──────────────────────────────────────────────────────────
 function collectSnapshot() {
   return {
@@ -229,6 +501,7 @@ function collectSnapshot() {
     system:    getSystemInfo(),
     wsl:       detectWsl(),
     guards: serializeGuards(),
+    managed: getManagedPortMap(),
   };
 }
 

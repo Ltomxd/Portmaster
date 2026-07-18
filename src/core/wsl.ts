@@ -31,16 +31,51 @@ export function detectWsl(): WslInfo {
   return { isWsl: false, wslVersion: null, distro: null };
 }
 
+// ── Circuit breaker for a broken/hanging powershell.exe ─────────────────────
+// The dashboard calls this every snapshot cycle (~3s). If the user's Windows
+// PowerShell install is broken (seen in the wild: CLR crashes, out-of-memory
+// exceptions inside powershell.exe itself), hammering it every few seconds
+// wastes a full 5s timeout each time and can pile up overlapping processes.
+// After a few consecutive failures, back off for a cooldown period instead
+// of retrying forever.
+const MAX_CONSECUTIVE_FAILURES = 3;
+const COOLDOWN_MS = 60_000;
+let consecutiveFailures = 0;
+let circuitOpenUntil = 0;
+let warnedOpen = false;
+
+function recordPowershellFailure(): void {
+  consecutiveFailures++;
+  if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES && Date.now() >= circuitOpenUntil) {
+    circuitOpenUntil = Date.now() + COOLDOWN_MS;
+    if (!warnedOpen) {
+      console.warn(`[wsl] powershell.exe failed ${consecutiveFailures}x in a row — pausing Windows-port scanning for ${COOLDOWN_MS / 1000}s. Windows-side ports/processes won't show up until it recovers.`);
+      warnedOpen = true;
+    }
+  }
+}
+
+function recordPowershellSuccess(): void {
+  consecutiveFailures = 0;
+  circuitOpenUntil = 0;
+  warnedOpen = false;
+}
+
 export function getWindowsPorts(): WindowsPort[] {
   const wslInfo = detectWsl();
   if (!wslInfo.isWsl) return [];
+  if (Date.now() < circuitOpenUntil) return [];
 
   try {
-    // Call powershell.exe from within WSL to get Windows-side listeners
+    // Call powershell.exe from within WSL to get Windows-side listeners.
+    // stdio explicitly silences the child's stderr — execSync passes it
+    // through to our own stderr by default, and a crashing powershell.exe
+    // dumps multi-KB .NET stack traces that would otherwise flood our logs.
     const output = execSync(
       'powershell.exe -NoProfile -Command "netstat -ano | Select-String LISTENING"',
-      { timeout: 5000, encoding: 'utf8' }
+      { timeout: 5000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
     );
+    recordPowershellSuccess();
 
     const ports: WindowsPort[] = [];
     const lines = output.split('\n');
@@ -64,6 +99,7 @@ export function getWindowsPorts(): WindowsPort[] {
     }
     return ports;
   } catch {
+    recordPowershellFailure();
     return [];
   }
 }
@@ -72,7 +108,7 @@ export function getWindowsProcessName(pid: number): string | null {
   try {
     const output = execSync(
       `powershell.exe -NoProfile -Command "Get-Process -Id ${pid} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName"`,
-      { timeout: 3000, encoding: 'utf8' }
+      { timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
     );
     return output.trim() || null;
   } catch {

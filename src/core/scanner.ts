@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, readlinkSync } from 'fs';
+import { readFileSync, readdirSync, readlinkSync, realpathSync } from 'fs';
 import { getWindowsPorts, detectWsl } from './wsl';
 
 export interface PortInfo {
@@ -36,7 +36,7 @@ function buildInodeMap(): Map<number, number> {
 }
 
 // ── Process name from /proc/PID ─────────────────────────────────────────────
-function getProcessName(pid: number): string | null {
+export function getProcessName(pid: number): string | null {
   try {
     return readFileSync(`/proc/${pid}/comm`, 'utf8').trim() || null;
   } catch {
@@ -53,12 +53,53 @@ export function getCommandForPid(pid: number): string | undefined {
   }
 }
 
+// Raw boot-relative start "tick" of a PID, from /proc/PID/stat field 22 —
+// fixed for the process's lifetime and independent of wall-clock time.
+// Comparing this across two separate readings (e.g. taken at different
+// moments, by different processes) isn't thrown off by clock drift the way
+// comparing ISO timestamps would be — WSL2's clock is prone to drift after
+// the host sleeps. Used to confirm a PID we're about to trust hasn't since
+// been reused by an unrelated process.
+export function getStarttimeTicks(pid: number): number | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const afterComm = stat.substring(stat.lastIndexOf(')') + 2).split(' ');
+    const ticks = parseFloat(afterComm[19]); // field 22 overall
+    return Number.isFinite(ticks) ? ticks : null;
+  } catch {
+    return null;
+  }
+}
+
+// Raw argv, untruncated and unjoined — for actually re-executing a process
+// (getCommandForPid's output is display-only: space-joined and cut to 120
+// chars, which would silently corrupt args containing spaces and drop the
+// tail of long commands if used to respawn).
+export function getCommandArgv(pid: number): string[] | null {
+  try {
+    const raw = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+    const parts = raw.split('\0').filter(Boolean);
+    return parts.length ? parts : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getCwdForPid(pid: number): string | undefined {
   try {
-    const { realpathSync } = require('fs');
     const full = realpathSync(`/proc/${pid}/cwd`);
     const parts = full.split('/').filter(Boolean);
     return parts.slice(-2).join('/') || full;
+  } catch {
+    return undefined;
+  }
+}
+
+// Full, untruncated cwd — for spawning (getCwdForPid's output is a
+// display-only shortened form, e.g. "descargas/Portmaster").
+export function getFullCwdForPid(pid: number): string | undefined {
+  try {
+    return realpathSync(`/proc/${pid}/cwd`);
   } catch {
     return undefined;
   }

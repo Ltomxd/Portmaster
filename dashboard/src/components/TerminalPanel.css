@@ -1,0 +1,13 @@
+/* Icon glyphs (folders, git branches, OS logos, etc.) used by fancy shell
+   prompts (Starship, Oh My Posh, Powerlevel10k...) live in Unicode Private
+   Use Area codepoints that ordinary monospace fonts don't ship — without
+   this, they render as empty tofu boxes. This is the Nerd Fonts "symbols
+   only" patch font: icons only, sized to a monospace grid, layered as a
+   fallback behind the real text font so normal characters are unaffected. */
+@font-face {
+  font-family: 'Symbols Nerd Font Mono';
+  src: url('../assets/fonts/SymbolsNerdFontMono-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}

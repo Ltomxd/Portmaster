@@ -17,6 +17,7 @@ const EMPTY: Snapshot = {
   },
   wsl: { isWsl: false, wslVersion: null, distro: null },
   guards: {},
+  managed: {},
 }
 
 type ConnState = 'connecting' | 'connected' | 'reconnecting'
@@ -89,6 +90,16 @@ export function usePortmaster() {
   const killPort = useCallback(async (port: number) => {
     const r = await fetch(`/api/ports/${port}/kill`, { method: 'POST' })
     return r.json()
+  }, [])
+
+  const inspectProcess = useCallback(async (pid: number, port: number) => {
+    const r = await fetch(`/api/inspect/${pid}?port=${port}`)
+    return safeJson(r)
+  }, [])
+
+  const adoptPort = useCallback(async (port: number) => {
+    const r = await fetch(`/api/ports/${port}/adopt`, { method: 'POST' })
+    return safeJson(r)
   }, [])
 
   const dockerAction = useCallback(async (name: string, action: string) => {
@@ -167,5 +178,5 @@ export function usePortmaster() {
     }
   }, [refresh])
 
-  return { snapshot, connState, refresh, killPort, dockerAction, pm2Action, createGuard, updateGuard, deleteGuard }
+  return { snapshot, connState, refresh, killPort, inspectProcess, adoptPort, dockerAction, pm2Action, createGuard, updateGuard, deleteGuard }
 }

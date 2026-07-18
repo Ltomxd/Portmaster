@@ -10,6 +10,43 @@ export interface PortInfo {
   cwd?: string
 }
 
+export interface ProcessSecurity {
+  pid: number
+  name: string | null
+  user: string | null
+  uid: number | null
+  exe: string | null
+  cwd?: string
+  command?: string
+  startedAt: string | null
+  threads: number | null
+  memoryKb: number | null
+}
+
+export interface ConnectionInfo {
+  proto: 'tcp' | 'udp'
+  state: string
+  local: string
+  remote: string
+  pid: number | null
+  external: boolean
+}
+
+export interface SecurityLogs {
+  source: 'journalctl-pid' | 'journalctl-comm' | 'none'
+  text: string
+}
+
+export interface InspectResult {
+  success: boolean
+  pid: number
+  port: number
+  process: ProcessSecurity
+  connections: ConnectionInfo[]
+  logs: SecurityLogs
+  error?: string
+}
+
 export interface DockerPort {
   containerPort: number
   hostPort: number | null
@@ -90,6 +127,22 @@ export interface GuardStatus {
   intervalMs?: number
 }
 
+export interface DirEntry {
+  name: string
+  isDirectory: boolean
+  size: number
+  mtime: string
+}
+
+export interface BrowseResult {
+  success: boolean
+  root?: string
+  path?: string
+  absolutePath?: string
+  entries?: DirEntry[]
+  error?: string
+}
+
 export interface Snapshot {
   timestamp: string
   ports: PortInfo[]
@@ -98,4 +151,5 @@ export interface Snapshot {
   system: SystemInfo
   wsl: WslInfo
   guards: Record<string, GuardStatus>
+  managed: Record<number, number>
 }

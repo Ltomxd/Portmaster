@@ -2,19 +2,26 @@ import { useState, useCallback } from 'react'
 import { LangProvider, useLang } from './context/LangContext'
 import { usePortmaster } from './hooks/usePortmaster'
 import { useToast } from './hooks/useToast'
+import { useLogSessions } from './hooks/useLogSessions'
+import { useTerminalSessions } from './hooks/useTerminalSessions'
 import { Sidebar } from './components/Sidebar'
 import { Overview } from './components/Overview'
 import { DockerTab } from './components/DockerTab'
 import { Pm2Tab } from './components/Pm2Tab'
 import { GuardTab } from './components/GuardTab'
+import { ProjectsTab } from './components/ProjectsTab'
 import { KillDialog } from './components/KillDialog'
 import { ToastList } from './components/ToastList'
+import { LogSessionsOverlay } from './components/LogSessionsOverlay'
+import { TerminalSessionsOverlay } from './components/TerminalSessionsOverlay'
 
-type Tab = 'overview' | 'docker' | 'pm2' | 'guard'
+type Tab = 'overview' | 'docker' | 'pm2' | 'guard' | 'projects'
 
 function Dashboard() {
-  const { snapshot, connState, refresh, killPort, dockerAction, pm2Action, createGuard, updateGuard, deleteGuard } = usePortmaster()
+  const { snapshot, connState, refresh, killPort, inspectProcess, adoptPort, dockerAction, pm2Action, createGuard, updateGuard, deleteGuard } = usePortmaster()
   const { toasts, toast, dismiss } = useToast()
+  const logSessions = useLogSessions()
+  const terminalSessions = useTerminalSessions()
   const { T } = useLang()
   const [tab, setTab] = useState<Tab>('overview')
   const [pending, setPending] = useState<{ port: number; process: string | null } | null>(null)
@@ -26,6 +33,7 @@ function Dashboard() {
     docker: snapshot.docker.filter(c => c.state === 'running').length,
     pm2: snapshot.pm2.filter(p => p.status === 'online').length,
     guard: Object.values(snapshot.guards).filter(g => g.running).length,
+    projects: 0,
   }
 
   const handleKill = useCallback(async () => {
@@ -55,35 +63,12 @@ function Dashboard() {
     else toast(r.error ?? 'Failed', 'error')
   }, [pm2Action, toast])
 
-
-  const handleProtectPort = useCallback(async (port: number, process: string | null) => {
-    const key = `port-${port}`
-    try {
-      const result = await createGuard({
-        key,
-        ports: [port],
-        autoKill: false,
-        allowedProcesses: process ? [process] : [],
-        intervalMs: 1500,
-      })
-      if (result?.success) {
-        toast(`Guard activo para :${port}`, 'success')
-        setTab('guard')
-      } else {
-        toast(result?.error ?? 'No se pudo crear la guardia', 'error')
-      }
-    } catch (e: any) {
-      toast(e?.message ?? 'Error creando guardia', 'error')
-    }
-    refresh()
-  }, [createGuard, toast, refresh])
-
   const subtitles: Record<Tab, string> = {
     overview: T('subtitle_overview'), docker: T('subtitle_docker'),
-    pm2: T('subtitle_pm2'), guard: T('subtitle_guard'),
+    pm2: T('subtitle_pm2'), guard: T('subtitle_guard'), projects: T('subtitle_projects'),
   }
   const titles: Record<Tab, string> = {
-    overview: T('overview'), docker: T('docker'), pm2: T('pm2'), guard: T('guard'),
+    overview: T('overview'), docker: T('docker'), pm2: T('pm2'), guard: T('guard'), projects: T('projects_title'),
   }
   const ok = connState === 'connected'
 
@@ -118,10 +103,11 @@ function Dashboard() {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-          {tab === 'overview' && <Overview snapshot={snapshot} onKill={(p, n) => setPending({ port: p, process: n })} onKillAll={handleKillAll} onProtect={handleProtectPort} />}
-          {tab === 'docker' && <DockerTab containers={snapshot.docker} onAction={handleDocker} />}
-          {tab === 'pm2' && <Pm2Tab processes={snapshot.pm2} onAction={handlePm2} />}
+          {tab === 'overview' && <Overview snapshot={snapshot} onKill={(p, n) => setPending({ port: p, process: n })} onKillAll={handleKillAll} inspectProcess={inspectProcess} adoptPort={adoptPort} createGuard={createGuard} updateGuard={updateGuard} deleteGuard={deleteGuard} refresh={refresh} onOpenLogs={logSessions.open} />}
+          {tab === 'docker' && <DockerTab containers={snapshot.docker} onAction={handleDocker} onOpenLogs={logSessions.open} />}
+          {tab === 'pm2' && <Pm2Tab processes={snapshot.pm2} onAction={handlePm2} onOpenLogs={logSessions.open} />}
           {tab === 'guard' && <GuardTab guards={snapshot.guards} onCreate={createGuard} onUpdate={updateGuard} onDelete={deleteGuard} onRefresh={refresh} />}
+          {tab === 'projects' && <ProjectsTab onOpenTerminal={terminalSessions.open} />}
         </div>
 
         <div className="app-footer">
@@ -134,6 +120,24 @@ function Dashboard() {
 
       <KillDialog port={pending?.port ?? null} processName={pending?.process ?? null} onConfirm={handleKill} onCancel={() => setPending(null)} />
       <ToastList toasts={toasts} onDismiss={dismiss} />
+      <LogSessionsOverlay
+        sessions={logSessions.sessions}
+        onRestore={logSessions.restore}
+        onHide={logSessions.hide}
+        onMinimize={logSessions.minimize}
+        onToggleFullscreen={logSessions.toggleFullscreen}
+        onTogglePause={logSessions.togglePause}
+        onClear={logSessions.clearLines}
+        onStop={logSessions.stop}
+        onReconnect={logSessions.reconnect}
+      />
+      <TerminalSessionsOverlay
+        sessions={terminalSessions.sessions}
+        onRestore={terminalSessions.restore}
+        onHide={terminalSessions.hide}
+        onMinimize={terminalSessions.minimize}
+        onStop={terminalSessions.stop}
+      />
     </div>
   )
 }

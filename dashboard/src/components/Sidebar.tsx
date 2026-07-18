@@ -2,7 +2,7 @@ import raccoon from '../assets/raccoon.jpg'
 import { useLang } from '../context/LangContext'
 import type { WslInfo } from '../types'
 
-type Tab = 'overview' | 'docker' | 'pm2' | 'guard'
+type Tab = 'overview' | 'docker' | 'pm2' | 'guard' | 'projects'
 
 interface Props {
   activeTab: Tab
@@ -21,6 +21,7 @@ export function Sidebar({ activeTab, onTabChange, counts, wsl, isOpen = false, o
     { id: 'docker', icon: '🐳', label: T('docker') },
     { id: 'pm2', icon: '⟳', label: T('pm2') },
     { id: 'guard', icon: '⬡', label: T('guard') },
+    { id: 'projects', icon: '📁', label: T('projects_title') },
   ]
 
   return (

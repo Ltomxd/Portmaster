@@ -12,6 +12,7 @@ import { getPm2Processes, isPm2Available, pm2Action, getPm2Logs } from './core/p
 import { loadConfig, initConfig, startServices, stopServices, getServiceStatus } from './core/orchestrator';
 import { detectWsl } from './core/wsl';
 import { startDashboard } from './dashboard/server';
+import { runDev } from './core/wrapper';
 import {
   printPortsTable,
   printDockerTable,
@@ -267,11 +268,16 @@ program
       console.log(chalk.bold.cyan(`\n  → http://localhost:${opts.port}\n`));
     }
 
-    startDashboard({
-      port: parseInt(opts.port),
-      host: opts.host,
-      refreshInterval: parseInt(opts.interval),
-    });
+    try {
+      startDashboard({
+        port: parseInt(opts.port),
+        host: opts.host,
+        refreshInterval: parseInt(opts.interval),
+      });
+    } catch (e: any) {
+      printError(e.message ?? String(e));
+      process.exit(1);
+    }
 
     process.on('SIGINT', () => {
       printInfo('\nDashboard stopped');
@@ -301,6 +307,16 @@ program
     const result = restartPort(parseInt(port));
     if (result.success) printSuccess(`Restarted process on :${port}`);
     else printError(result.error ?? 'Restart failed');
+  });
+
+// ── dev (documentation only — actually handled by the intercept below,
+// since the wrapped command's own flags must never be parsed by commander) ──
+program
+  .command('dev')
+  .description('Run a dev command with live-log capture: portmaster dev [--name <name>] -- <command...>')
+  .action(() => {
+    printError('Usage: portmaster dev [--name <name>] -- <command...>');
+    printInfo('Example: portmaster dev -- pnpm run dev');
   });
 
 program
@@ -370,4 +386,26 @@ function waitForYes(): Promise<boolean> {
   });
 }
 
-program.parse();
+// ── portmaster dev [--name <name>] -- <command...> ──────────────────────
+// Handled before commander ever sees argv: the wrapped command can carry its
+// own flags (`pnpm run dev -- --port 3001`), which must reach it verbatim,
+// not get interpreted as portmaster's own options.
+if (process.argv[2] === 'dev') {
+  let rest = process.argv.slice(3);
+  let name: string | undefined;
+  if (rest[0] === '--name' || rest[0]?.startsWith('--name=')) {
+    if (rest[0].includes('=')) { name = rest[0].split('=').slice(1).join('='); rest = rest.slice(1); }
+    else { name = rest[1]; rest = rest.slice(2); }
+  }
+  if (rest[0] === '--') rest = rest.slice(1);
+
+  if (rest.length === 0) {
+    printError('Usage: portmaster dev [--name <name>] -- <command...>');
+    printInfo('Example: portmaster dev -- pnpm run dev');
+    process.exit(1);
+  }
+
+  runDev(rest, name);
+} else {
+  program.parse();
+}

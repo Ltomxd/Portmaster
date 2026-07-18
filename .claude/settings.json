@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(kill -9 542052)",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const s=JSON.parse\\(d\\);console.log\\('has managed field:', 'managed' in s\\)}\\)\")",
+      "Bash(npx --yes playwright --version)",
+      "Read(//home/kira/.cache/**)",
+      "Bash(npx --yes playwright install chromium --with-deps)"
+    ]
+  }
+}

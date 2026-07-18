@@ -27,6 +27,14 @@ export function killPort(port: number, safe = false): KillResult {
     return { port, pid: null, process: null, success: false, error: 'Port not in use', source: 'linux' };
   }
 
+  return killPortInfo(port, info);
+}
+
+// Same as killPort, but for callers that already have a fresh PortInfo (e.g.
+// adoptPort, which needs it anyway to capture the command before killing) —
+// skips a second full port scan, which on WSL re-triggers a ~1s+ powershell.exe
+// round-trip to enumerate Windows-side ports that this call doesn't need.
+export function killPortInfo(port: number, info: PortInfo): KillResult {
   if (info.source === 'windows') {
     return killWindowsPort(port, info);
   }
@@ -78,7 +86,7 @@ function killWindowsPort(port: number, info: PortInfo): KillResult {
     const { execSync } = require('child_process');
     execSync(
       `powershell.exe -NoProfile -Command "Stop-Process -Id ${info.pid} -Force -ErrorAction SilentlyContinue"`,
-      { timeout: 5000 }
+      { timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
     );
     return { port, pid: info.pid, process: info.process, success: true, source: 'windows' };
   } catch (e: any) {
