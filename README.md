@@ -21,13 +21,26 @@
 | 📜 **Live logs** | Real-time log streaming for Docker containers, PM2 apps, and host processes — sessions keep running when you close the viewer, minimize to a tray, or go fullscreen |
 | 🔁 **Adopt a process** | Turn an already-running host process into a live-logged one — kills and relaunches it under Portmaster's supervision, no code changes needed |
 | ▶ **`portmaster dev`** | Wrap any dev command (`portmaster dev -- pnpm run dev`) to get live logs for it without adopting — your terminal output looks identical, Portmaster just also taps it |
-| 📁 **Projects + Terminal** | Browse a saved projects folder from the dashboard and open a real, interactive Bash terminal (PTY-backed, Nerd Font icons and all) scoped to any subfolder — the shell persists server-side, surviving minimize, tab close, and page refresh, so a `pnpm run dev` you left running keeps going until you explicitly stop it |
+| 📁 **Projects + Terminal** | Browse a saved projects folder from the dashboard and open a real, interactive Bash terminal (Nerd Font icons, GPU-rendered) scoped to any subfolder — backed by a detached `tmux` session per folder, so a `pnpm run dev` you left running survives minimize, tab close, page refresh, *and even a dashboard restart*, until you explicitly stop it |
 | 🐳 **Docker** | List, start, stop, restart containers + port mapping + live logs |
 | 🔄 **PM2** | Full PM2 integration — list, restart, stop + live logs |
 | 📋 **Orchestration** | Manage multi-service stacks with `.portmaster.yaml` |
 | 🌐 **Dashboard** | Real-time React web UI with WebSocket updates |
 | 🌍 **i18n** | English & Spanish interface |
 | 🐋 **Docker deploy** | Auto-start on machine boot via `docker compose up -d` |
+| 🕐 **Live clock** | Auto-detects your timezone, ticks every second, click to toggle 12h/24h |
+| ★ **Favorites** | Pin ports and project folders so they float to the top of their lists |
+| ⚡ **Saved commands** | One-click buttons per project folder (`pnpm dev`, `docker compose up`, …) that run in that folder's terminal |
+| ⊞ **Split terminal** | Open a second terminal alongside the active one — two folders' shells side by side |
+| 📝 **.env editor** | Read and write a folder's `.env` right from the Projects tab, no editor needed |
+| ⭳ **Export / import config** | Back up favorites, saved commands, and your projects root as one JSON file |
+| 📊 **Per-process CPU / Mem** | Live resource usage in the process table, computed from `/proc` deltas |
+| 📈 **Resource history** | Hoverable sparkline trend for CPU / Memory / Disk, useful for spotting a slow leak |
+| 🔔 **Notifications** | Opt-in toast + browser notification when a Guard kills something, an adopted process stops, or a new port conflict appears |
+| 📋 **Audit log** | Persistent record of every kill, Guard action, and adoption, with timestamps |
+| ♻ **Auto-restart** | Opt-in, per adopted process — relaunches it if it crashes, with crash-loop protection; never restarts one you stopped on purpose |
+| 🔒 **Password protection** | Off by default; set a password from the sidebar to gate the whole dashboard (API + WebSocket) behind a login screen |
+| 🔍 **Command palette** | `Ctrl/Cmd+K` — jump to a tab, kill a port, or open a favorite project's terminal without leaving the keyboard |
 
 ---
 
@@ -40,7 +53,7 @@ bash install.sh
 source ~/.bashrc
 ```
 
-> **Requirements:** Node.js 18+, and `python3` + `make` + `g++` (or `build-essential`) for compiling the native terminal module (`node-pty`) on first `npm install`.
+> **Requirements:** Node.js 18+; `python3` + `make` + `g++` (or `build-essential`) for compiling the native terminal module (`node-pty`) on first `npm install`; and `tmux` (`sudo apt install tmux`) — the Projects tab's terminals run as detached tmux sessions so they survive not just a closed browser tab but a dashboard restart too.
 
 ---
 
@@ -158,7 +171,25 @@ pm2 status
 
 **Protect (🛡):** creates a guard that auto-kills anything else that binds a protected port, with an editable list of allowed process names and a check-interval preset. Protected ports show a 🛡 badge right in the table.
 
-**Projects tab:** point it at the folder where your projects live (e.g. `/home/you/code`) — saved once, reused every time the dashboard starts. Browse into any subfolder and open a real interactive Bash terminal there (🖳), backed by an actual PTY (`node-pty`) with full color, cursor movement, and Nerd Font prompt icons — it behaves like a normal terminal because it is one. The shell lives server-side, keyed by folder, independent of the browser: minimizing it, closing the tab, or refreshing the page never kills it — reopen that same folder any time and it reattaches, replaying what happened while you were away, so something like `pnpm run dev` just keeps running. Only the explicit **Terminar** button actually ends it.
+**Projects tab:** point it at the folder where your projects live (e.g. `/home/you/code`) — saved once, reused every time the dashboard starts. Browse into any subfolder and open a real interactive Bash terminal there (🖳), rendered with `@xterm/xterm` (GPU-accelerated via WebGL when available) over a raw binary WebSocket for lag-free typing and output. Each terminal is backed by a detached `tmux` session, one per folder — not just a PTY owned by the dashboard process — so minimizing it, closing the tab, refreshing the page, *or the dashboard itself restarting* never touches what's running inside: leave `pnpm run dev` going and it keeps going, full stop. A green "Running" indicator marks any folder with a live session, and its tray chip survives a reload too. Only the explicit **Terminar** button (`tmux kill-session`) actually ends it.
+- **⊞ Split** opens a second terminal alongside the current one instead of replacing it — handy for watching a backend and frontend dev server at once.
+- **★** on any folder pins it to the top of the list; the same star on a port row in Overview does the same there.
+- **+ Add command** saves a one-click button (a label and a shell command) scoped to that folder — click it and it opens/reuses that folder's terminal and runs the command for you.
+- **📝 .env** opens a small editor for that folder's `.env` file (hidden from the regular listing on purpose) — read, edit, save, no need to open a real editor for a one-line change.
+
+**System resources:** CPU / Memory / Disk cards now carry a small hoverable trend line under the percentage bar — the last ~6 minutes at the dashboard's poll rate, enough to notice a memory leak creeping up without needing an external monitoring tool. The process table also shows live CPU % and memory (MB) per row, computed from `/proc/<pid>/stat` deltas.
+
+**Command palette:** `Ctrl+K` (or the search button in the header) opens a fuzzy search over tabs, active ports (search + kill), and favorite projects (search + open terminal) — everything in one box, arrow keys to move, Enter to run.
+
+**Notifications:** click 🔔 in the header once to grant permission; from then on a Guard actually killing something, a managed process disappearing, or a fresh port conflict raises both an in-app toast and a real OS notification (so it's visible even if the tab isn't focused). Nothing fires until you opt in.
+
+**Audit log:** every kill, Guard auto-kill, and adoption is timestamped and kept (last 500) in `~/.portmaster/audit.json` — open it from **📋 Audit Log** in the sidebar.
+
+**Auto-restart:** on an adopted (managed) process's row, click ♻ to have Portmaster relaunch it automatically if it crashes — off by default, since restarting something you meant to stop would be a bug, not a feature. A process you kill from the dashboard is recognized as intentional and never auto-restarts; five rapid crashes in a row and it gives up rather than loop forever.
+
+**Password protection:** off by default — this is a local dev dashboard, not a public service. Set a password from **🔒 Set password** in the sidebar to gate every API route and the WebSocket behind a login screen; useful if the dashboard is ever reachable beyond `localhost` (WSL's `0.0.0.0` bind makes that easier to do by accident than it sounds).
+
+**Backup:** **⭳ Export** / **⭱ Import** in the sidebar round-trip your favorites, saved commands, and projects root as a single JSON file — the password hash never leaves the server, so it's safe to share.
 
 **Language:** Toggle EN / ES from the sidebar.
 

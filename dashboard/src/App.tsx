@@ -4,24 +4,32 @@ import { usePortmaster } from './hooks/usePortmaster'
 import { useToast } from './hooks/useToast'
 import { useLogSessions } from './hooks/useLogSessions'
 import { useTerminalSessions } from './hooks/useTerminalSessions'
+import { useFavorites } from './hooks/useFavorites'
+import { useNotifications } from './hooks/useNotifications'
 import { Sidebar } from './components/Sidebar'
 import { Overview } from './components/Overview'
 import { DockerTab } from './components/DockerTab'
 import { Pm2Tab } from './components/Pm2Tab'
 import { GuardTab } from './components/GuardTab'
 import { ProjectsTab } from './components/ProjectsTab'
+import { FavoritesTab } from './components/FavoritesTab'
 import { KillDialog } from './components/KillDialog'
 import { ToastList } from './components/ToastList'
 import { LogSessionsOverlay } from './components/LogSessionsOverlay'
 import { TerminalSessionsOverlay } from './components/TerminalSessionsOverlay'
+import { Clock } from './components/Clock'
+import { AuthGate } from './components/AuthGate'
+import { CommandPalette } from './components/CommandPalette'
 
-type Tab = 'overview' | 'docker' | 'pm2' | 'guard' | 'projects'
+type Tab = 'overview' | 'docker' | 'pm2' | 'guard' | 'projects' | 'favorites'
 
 function Dashboard() {
   const { snapshot, connState, refresh, killPort, inspectProcess, adoptPort, dockerAction, pm2Action, createGuard, updateGuard, deleteGuard } = usePortmaster()
   const { toasts, toast, dismiss } = useToast()
   const logSessions = useLogSessions()
   const terminalSessions = useTerminalSessions()
+  const favorites = useFavorites()
+  const notifications = useNotifications(snapshot, toast)
   const { T } = useLang()
   const [tab, setTab] = useState<Tab>('overview')
   const [pending, setPending] = useState<{ port: number; process: string | null } | null>(null)
@@ -34,6 +42,7 @@ function Dashboard() {
     pm2: snapshot.pm2.filter(p => p.status === 'online').length,
     guard: Object.values(snapshot.guards).filter(g => g.running).length,
     projects: 0,
+    favorites: favorites.favoritePorts.size + favorites.favoriteProjects.size,
   }
 
   const handleKill = useCallback(async () => {
@@ -66,9 +75,11 @@ function Dashboard() {
   const subtitles: Record<Tab, string> = {
     overview: T('subtitle_overview'), docker: T('subtitle_docker'),
     pm2: T('subtitle_pm2'), guard: T('subtitle_guard'), projects: T('subtitle_projects'),
+    favorites: T('subtitle_favorites'),
   }
   const titles: Record<Tab, string> = {
     overview: T('overview'), docker: T('docker'), pm2: T('pm2'), guard: T('guard'), projects: T('projects_title'),
+    favorites: T('favorites_title'),
   }
   const ok = connState === 'connected'
 
@@ -93,6 +104,20 @@ function Dashboard() {
             </div>
           </div>
           <div className="header-actions">
+            <button
+              onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
+              title={T('command_palette_placeholder')}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', padding: '6px 12px', borderRadius: 8, fontSize: 12, fontFamily: 'var(--mono)' }}
+            >
+              🔍 <kbd style={{ background: 'var(--surface2)', border: '1px solid var(--border2)', borderRadius: 3, padding: '1px 5px', fontSize: 10 }}>Ctrl K</kbd>
+            </button>
+            <Clock />
+            {notifications.permission === 'default' && (
+              <HBtn onClick={notifications.requestPermission} label={`🔔 ${T('enable_notifications')}`} />
+            )}
+            {notifications.permission === 'granted' && (
+              <span title={T('notifications_enabled')} style={{ fontSize: 14, opacity: .6 }}>🔔</span>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: ok ? 'var(--green)' : 'var(--muted)' }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: ok ? 'var(--green)' : 'var(--yellow)', display: 'inline-block', animation: ok ? 'pulse 2s infinite' : 'none' }} />
               {ok ? T('connected') : connState === 'reconnecting' ? T('reconnecting') : T('connecting')}
@@ -103,11 +128,29 @@ function Dashboard() {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-          {tab === 'overview' && <Overview snapshot={snapshot} onKill={(p, n) => setPending({ port: p, process: n })} onKillAll={handleKillAll} inspectProcess={inspectProcess} adoptPort={adoptPort} createGuard={createGuard} updateGuard={updateGuard} deleteGuard={deleteGuard} refresh={refresh} onOpenLogs={logSessions.open} />}
+          {tab === 'overview' && <Overview snapshot={snapshot} onKill={(p, n) => setPending({ port: p, process: n })} onKillAll={handleKillAll} inspectProcess={inspectProcess} adoptPort={adoptPort} createGuard={createGuard} updateGuard={updateGuard} deleteGuard={deleteGuard} refresh={refresh} onOpenLogs={logSessions.open} favoritePorts={favorites.favoritePorts} onToggleFavoritePort={favorites.toggleFavoritePort} />}
           {tab === 'docker' && <DockerTab containers={snapshot.docker} onAction={handleDocker} onOpenLogs={logSessions.open} />}
           {tab === 'pm2' && <Pm2Tab processes={snapshot.pm2} onAction={handlePm2} onOpenLogs={logSessions.open} />}
           {tab === 'guard' && <GuardTab guards={snapshot.guards} onCreate={createGuard} onUpdate={updateGuard} onDelete={deleteGuard} onRefresh={refresh} />}
-          {tab === 'projects' && <ProjectsTab onOpenTerminal={terminalSessions.open} />}
+          {tab === 'projects' && (
+            <ProjectsTab
+              onOpenTerminal={terminalSessions.open}
+              onOpenTerminalSplit={terminalSessions.openSplit}
+              favoriteProjects={favorites.favoriteProjects}
+              onToggleFavoriteProject={favorites.toggleFavoriteProject}
+            />
+          )}
+          {tab === 'favorites' && (
+            <FavoritesTab
+              ports={snapshot.ports}
+              favoritePorts={favorites.favoritePorts}
+              favoriteProjects={favorites.favoriteProjects}
+              onToggleFavoritePort={favorites.toggleFavoritePort}
+              onToggleFavoriteProject={favorites.toggleFavoriteProject}
+              onKill={(p, n) => setPending({ port: p, process: n })}
+              onOpenTerminal={terminalSessions.open}
+            />
+          )}
         </div>
 
         <div className="app-footer">
@@ -137,6 +180,14 @@ function Dashboard() {
         onHide={terminalSessions.hide}
         onMinimize={terminalSessions.minimize}
         onStop={terminalSessions.stop}
+        onCommandSent={terminalSessions.clearPendingCommand}
+      />
+      <CommandPalette
+        ports={snapshot.ports}
+        onKill={(p, n) => setPending({ port: p, process: n })}
+        favoriteProjects={favorites.favoriteProjects}
+        onOpenTerminal={terminalSessions.open}
+        onSetTab={setTab}
       />
     </div>
   )
@@ -154,5 +205,5 @@ function HBtn({ onClick, label, primary }: { onClick: () => void; label: string;
 }
 
 export default function App() {
-  return <LangProvider><Dashboard /></LangProvider>
+  return <LangProvider><AuthGate><Dashboard /></AuthGate></LangProvider>
 }

@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { scanPorts, PortInfo } from './scanner';
 import { killPort } from './killer';
+import { appendAudit } from './audit';
 
 export interface GuardEvent {
   type: 'port_appeared' | 'port_killed' | 'port_disappeared' | 'port_changed';
@@ -102,6 +103,7 @@ export class PortGuard extends EventEmitter {
           );
           if (!isAllowed) {
             killPort(port);
+            appendAudit({ action: 'guard_kill', port, process: info.process, detail: 'unauthorized process auto-killed by Guard' });
             const killEvent = this.makeEvent('port_killed', port, info);
             this.emit('event', killEvent);
             this.options.onEvent(killEvent);

@@ -1,6 +1,8 @@
-import { readdirSync, statSync, realpathSync } from 'fs';
+import { readdirSync, statSync, realpathSync, readFileSync, writeFileSync } from 'fs';
 import { join, relative, isAbsolute } from 'path';
 import { getConfig } from './config';
+
+const MAX_ENV_BYTES = 200_000; // sane cap — this is a quick editor, not a file manager
 
 export interface DirEntry {
   name: string;
@@ -82,4 +84,32 @@ export function resolveProjectPath(relPath: string): string | null {
   const { projectsRoot } = getConfig();
   if (!projectsRoot) return null;
   return resolveWithinRoot(projectsRoot, relPath ?? '');
+}
+
+// .env is deliberately excluded from the regular directory listing (it's a
+// dotfile — noise for a project picker), but it's exactly what you want a
+// one-click editor for, so it gets its own narrow read/write pair instead.
+export function readEnvFile(relPath: string): { success: boolean; content?: string; error?: string } {
+  const dir = resolveProjectPath(relPath);
+  if (!dir) return { success: false, error: 'Invalid path' };
+  try {
+    const content = readFileSync(join(dir, '.env'), 'utf8');
+    if (content.length > MAX_ENV_BYTES) return { success: false, error: '.env is too large to edit here' };
+    return { success: true, content };
+  } catch (e: any) {
+    if (e.code === 'ENOENT') return { success: true, content: '' };
+    return { success: false, error: e.message ?? 'Could not read .env' };
+  }
+}
+
+export function writeEnvFile(relPath: string, content: string): { success: boolean; error?: string } {
+  const dir = resolveProjectPath(relPath);
+  if (!dir) return { success: false, error: 'Invalid path' };
+  if (content.length > MAX_ENV_BYTES) return { success: false, error: '.env content too large' };
+  try {
+    writeFileSync(join(dir, '.env'), content, 'utf8');
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e.message ?? 'Could not write .env' };
+  }
 }

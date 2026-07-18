@@ -1,12 +1,18 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useLang } from '../context/LangContext'
 import type { DirEntry, BrowseResult } from '../types'
+import { EnvEditorDialog } from './EnvEditorDialog'
+
+interface SavedCommand { label: string; cmd: string }
 
 interface Props {
-  onOpenTerminal: (cwd: string, label: string) => void
+  onOpenTerminal: (cwd: string, label: string, pendingCommand?: string) => void
+  onOpenTerminalSplit: (cwd: string, label: string) => void
+  favoriteProjects: Set<string>
+  onToggleFavoriteProject: (path: string) => void
 }
 
-export function ProjectsTab({ onOpenTerminal }: Props) {
+export function ProjectsTab({ onOpenTerminal, onOpenTerminalSplit, favoriteProjects, onToggleFavoriteProject }: Props) {
   const { T } = useLang()
   const [root, setRoot] = useState<string | null | undefined>(undefined) // undefined = loading
   const [pathInput, setPathInput] = useState('')
@@ -19,6 +25,12 @@ export function ProjectsTab({ onOpenTerminal }: Props) {
   const [loadingEntries, setLoadingEntries] = useState(false)
   const [editingRoot, setEditingRoot] = useState(false)
   const [liveTerminals, setLiveTerminals] = useState<Set<string>>(new Set())
+
+  const [commands, setCommands] = useState<SavedCommand[]>([])
+  const [addingCommand, setAddingCommand] = useState(false)
+  const [newCmdLabel, setNewCmdLabel] = useState('')
+  const [newCmdCmd, setNewCmdCmd] = useState('')
+  const [envEditorOpen, setEnvEditorOpen] = useState(false)
 
   const loadRoot = useCallback(() => {
     fetch('/api/projects/root').then(r => r.json()).then(d => setRoot(d.projectsRoot ?? null)).catch(() => setRoot(null))
@@ -58,6 +70,31 @@ export function ProjectsTab({ onOpenTerminal }: Props) {
     const id = setInterval(poll, 3000)
     return () => { cancelled = true; clearInterval(id) }
   }, [root])
+
+  const loadCommands = useCallback((relPath: string) => {
+    fetch(`/api/projects/commands?path=${encodeURIComponent(relPath)}`)
+      .then(r => r.json())
+      .then(d => setCommands(d.success ? d.commands ?? [] : []))
+      .catch(() => setCommands([]))
+  }, [])
+
+  useEffect(() => { if (root) loadCommands(currentPath) }, [root, currentPath, loadCommands])
+
+  const addCommand = async () => {
+    if (!newCmdLabel.trim() || !newCmdCmd.trim()) return
+    const r = await fetch('/api/projects/commands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: currentPath, label: newCmdLabel.trim(), cmd: newCmdCmd.trim() }) }).then(r => r.json())
+    if (r.success) { setCommands(r.commands ?? []); setNewCmdLabel(''); setNewCmdCmd(''); setAddingCommand(false) }
+  }
+
+  const removeCommand = async (index: number) => {
+    const r = await fetch('/api/projects/commands', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: currentPath, index }) }).then(r => r.json())
+    if (r.success) setCommands(r.commands ?? [])
+  }
+
+  const runCommand = (cmd: string) => {
+    const label = segments.length ? segments[segments.length - 1] : (root ?? 'root')
+    onOpenTerminal(currentPath, label, cmd)
+  }
 
   const handleSaveRoot = async () => {
     if (!pathInput.trim()) return
@@ -112,13 +149,34 @@ export function ProjectsTab({ onOpenTerminal }: Props) {
     <div style={{ padding: '20px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
         <SectionLabel>{T('projects_title')}</SectionLabel>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => { setPathInput(root); setEditingRoot(true) }} style={miniBtn}>⚙ {T('projects_change_root')}</button>
+          <button onClick={() => setEnvEditorOpen(true)} title={T('env_edit_here')} style={miniBtn}>📝 .env</button>
+          <button onClick={() => onOpenTerminalSplit(currentPath, segments.length ? segments[segments.length - 1] : (root ?? 'root'))} title={T('terminal_open_split')} style={miniBtn}>⊞ {T('terminal_split')}</button>
           <button onClick={openTerminalHere} title={liveTerminals.has(currentPath) ? T('terminal_running_hint') : undefined} style={{ ...miniBtn, display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(56,217,169,.1)', border: '1px solid rgba(56,217,169,.35)', color: 'var(--green)' }}>
             {liveTerminals.has(currentPath) && <LiveDot />}
             🖳 {T('terminal_open_here')}
           </button>
         </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+        {commands.map((c, i) => (
+          <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 7, padding: '3px 4px 3px 10px' }}>
+            <button onClick={() => runCommand(c.cmd)} title={c.cmd} style={{ background: 'transparent', border: 'none', color: 'var(--subtle)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>▶ {c.label}</button>
+            <button onClick={() => removeCommand(i)} title={T('remove_command')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: 11, padding: '2px 6px' }}>✕</button>
+          </span>
+        ))}
+        {addingCommand ? (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 7, padding: '4px 6px' }}>
+            <input value={newCmdLabel} onChange={e => setNewCmdLabel(e.target.value)} placeholder={T('command_label_placeholder')} style={cmdInput} />
+            <input value={newCmdCmd} onChange={e => setNewCmdCmd(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addCommand() }} placeholder="pnpm run dev" style={{ ...cmdInput, width: 160, fontFamily: 'var(--mono)' }} />
+            <button onClick={addCommand} disabled={!newCmdLabel.trim() || !newCmdCmd.trim()} style={{ background: 'rgba(116,185,255,.15)', border: '1px solid rgba(116,185,255,.4)', color: 'var(--blue)', padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600 }}>{T('save')}</button>
+            <button onClick={() => { setAddingCommand(false); setNewCmdLabel(''); setNewCmdCmd('') }} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: 12, padding: '2px 6px' }}>{T('cancel')}</button>
+          </span>
+        ) : (
+          <button onClick={() => setAddingCommand(true)} title={T('add_command')} style={{ ...miniBtn, padding: '4px 10px', fontSize: 12 }}>+ {T('add_command')}</button>
+        )}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: 14, fontSize: 12, fontFamily: 'var(--mono)' }}>
@@ -144,9 +202,14 @@ export function ProjectsTab({ onOpenTerminal }: Props) {
               {[T('name'), T('projects_modified'), ''].map(h => <th key={h} style={{ padding: '9px 14px', textAlign: 'left', fontSize: 11, fontWeight: 600, letterSpacing: '.5px', color: 'var(--muted)', textTransform: 'uppercase' }}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {entries.map(entry => {
+              {[...entries].sort((a, b) => {
+                const aPath = currentPath ? `${currentPath}/${a.name}` : a.name
+                const bPath = currentPath ? `${currentPath}/${b.name}` : b.name
+                return Number(favoriteProjects.has(bPath)) - Number(favoriteProjects.has(aPath))
+              }).map(entry => {
                 const entryPath = currentPath ? `${currentPath}/${entry.name}` : entry.name
                 const isLive = entry.isDirectory && liveTerminals.has(entryPath)
+                const isFavorite = entry.isDirectory && favoriteProjects.has(entryPath)
                 return (
                   <tr key={entry.name} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td style={{ padding: '10px 14px' }}>
@@ -162,7 +225,10 @@ export function ProjectsTab({ onOpenTerminal }: Props) {
                     <td style={{ padding: '10px 14px', fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>{new Date(entry.mtime).toLocaleString()}</td>
                     <td style={{ padding: '10px 14px', textAlign: 'right' }}>
                       {entry.isDirectory && (
-                        <button onClick={() => onOpenTerminal(entryPath, entry.name)} title={isLive ? T('terminal_running_hint') : `${T('terminal_open_here')}: ${entry.name}`} style={{ background: isLive ? 'rgba(56,217,169,.1)' : 'transparent', border: `1px solid ${isLive ? 'rgba(56,217,169,.4)' : 'var(--border2)'}`, color: isLive ? 'var(--green)' : 'var(--subtle)', padding: '4px 9px', borderRadius: 6, fontSize: 12 }}>🖳</button>
+                        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                          <button onClick={() => onToggleFavoriteProject(entryPath)} title={isFavorite ? T('unfavorite') : T('favorite')} style={{ background: 'transparent', border: 'none', color: isFavorite ? 'var(--yellow)' : 'var(--subtle)', padding: '4px 7px', borderRadius: 6, fontSize: 12 }}>{isFavorite ? '★' : '☆'}</button>
+                          <button onClick={() => onOpenTerminal(entryPath, entry.name)} title={isLive ? T('terminal_running_hint') : `${T('terminal_open_here')}: ${entry.name}`} style={{ background: isLive ? 'rgba(56,217,169,.1)' : 'transparent', border: `1px solid ${isLive ? 'rgba(56,217,169,.4)' : 'var(--border2)'}`, color: isLive ? 'var(--green)' : 'var(--subtle)', padding: '4px 9px', borderRadius: 6, fontSize: 12 }}>🖳</button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -173,6 +239,11 @@ export function ProjectsTab({ onOpenTerminal }: Props) {
         )}
       </div>
 
+      <EnvEditorDialog
+        path={envEditorOpen ? currentPath : null}
+        label={segments.length ? segments[segments.length - 1] : (root ?? 'root')}
+        onClose={() => setEnvEditorOpen(false)}
+      />
     </div>
   )
 }
@@ -187,6 +258,7 @@ function crumbBtn(active: boolean): React.CSSProperties {
 }
 
 const miniBtn: React.CSSProperties = { background: 'transparent', border: '1px solid var(--border2)', color: 'var(--muted)', padding: '6px 12px', borderRadius: 7, fontSize: 12, fontWeight: 500, cursor: 'pointer' }
+const cmdInput: React.CSSProperties = { background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 5, padding: '4px 8px', fontSize: 12, width: 90, outline: 'none' }
 
 function SectionLabel({ children }: { children: React.ReactNode }) { return <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.6px', color: 'var(--muted)', textTransform: 'uppercase' }}>{children}</div> }
 

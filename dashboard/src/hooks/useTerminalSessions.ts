@@ -5,6 +5,7 @@ export interface TerminalSessionMeta {
   label: string
   visible: boolean
   minimized: boolean
+  pendingCommand?: string
 }
 
 const STORAGE_KEY = 'portmaster:terminals'
@@ -70,11 +71,32 @@ export function useTerminalSessions() {
     return Object.fromEntries(Object.entries(prev).map(([k, s]) => [k, k === keep ? s : demote(s)]))
   }
 
-  const open = useCallback((cwd: string, label: string) => {
+  const open = useCallback((cwd: string, label: string, pendingCommand?: string) => {
     setSessions(prev => {
       const others = demoteVisible(prev, cwd)
-      return { ...others, [cwd]: { cwd, label, visible: true, minimized: false } }
+      return { ...others, [cwd]: { cwd, label, visible: true, minimized: false, pendingCommand } }
     })
+  }, [])
+
+  // Opens alongside whatever's currently the primary visible session
+  // instead of replacing it, capped at two side by side — anything else
+  // that was visible gets tucked back into the tray.
+  const openSplit = useCallback((cwd: string, label: string) => {
+    setSessions(prev => {
+      const visibleEntries = Object.entries(prev).filter(([k, s]) => k !== cwd && s.visible)
+      const keepKey = visibleEntries.length ? visibleEntries[visibleEntries.length - 1][0] : null
+      const next: Record<string, TerminalSessionMeta> = {}
+      for (const [k, s] of Object.entries(prev)) {
+        if (k === cwd) continue
+        next[k] = k === keepKey ? { ...s, visible: true, minimized: false } : (s.visible && !s.minimized ? { ...s, visible: false, minimized: true } : s)
+      }
+      next[cwd] = { cwd, label, visible: true, minimized: false }
+      return next
+    })
+  }, [])
+
+  const clearPendingCommand = useCallback((cwd: string) => {
+    setSessions(prev => (prev[cwd]?.pendingCommand ? { ...prev, [cwd]: { ...prev[cwd], pendingCommand: undefined } } : prev))
   }, [])
 
   const restore = useCallback((cwd: string) => {
@@ -102,5 +124,5 @@ export function useTerminalSessions() {
     fetch('/api/terminal/kill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd }) }).catch(() => {})
   }, [])
 
-  return { sessions, open, restore, hide, minimize, stop }
+  return { sessions, open, openSplit, restore, hide, minimize, stop, clearPendingCommand }
 }

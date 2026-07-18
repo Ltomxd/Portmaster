@@ -8,6 +8,8 @@ export interface PortInfo {
   source: 'linux' | 'windows'
   command?: string
   cwd?: string
+  cpuPercent?: number
+  memoryMB?: number
 }
 
 export interface ProcessSecurity {

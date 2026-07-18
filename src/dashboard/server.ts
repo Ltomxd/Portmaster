@@ -13,11 +13,13 @@ import { killPort } from '../core/killer';
 import { getAllGuards, startGuard, stopGuard } from '../core/guard';
 import { detectWsl } from '../core/wsl';
 import { getProcessSecurity, getConnectionsForPort, getSecurityLogs, resolveHostLogPath } from '../core/inspect';
-import { adoptPort, getManagedProcess, getManagedPortMap } from '../core/supervisor';
+import { adoptPort, getManagedProcess, getManagedPortMap, setAutoRestart, stopManaged } from '../core/supervisor';
 import { stripAnsi } from '../core/ansi';
-import { getConfig, setProjectsRoot } from '../core/config';
-import { browseProjects, resolveProjectPath } from '../core/projects';
-import { getOrCreateShell, killShellSession, listActiveShellPaths } from '../core/terminal';
+import { getConfig, setProjectsRoot, toggleFavoritePort, toggleFavoriteProject, getSavedCommands, addSavedCommand, removeSavedCommand, replaceConfig, isAuthEnabled, setDashboardPassword, verifyDashboardPassword } from '../core/config';
+import { SESSION_COOKIE, createSession, isValidSession, destroySession, parseCookie } from '../core/auth';
+import { browseProjects, resolveProjectPath, readEnvFile, writeEnvFile } from '../core/projects';
+import { attachShell, killShellSession, listActiveShellPaths, isTmuxAvailable } from '../core/terminal';
+import { appendAudit, getAuditLog } from '../core/audit';
 
 export interface DashboardOptions {
   port?: number;
@@ -57,6 +59,54 @@ export function startDashboard(options: DashboardOptions = {}): void {
 
   const app = express();
   app.use(express.json());
+
+  // ── Auth gate (opt-in — see /api/auth/*) ─────────────────────────────────
+  // Static assets and the auth endpoints themselves always pass through
+  // (the SPA shell needs to load *before* it can show a login screen); every
+  // other /api/* route requires a valid session once a password is set. The
+  // WebSocket upgrade handler below applies the same check separately, since
+  // it never goes through Express middleware.
+  app.use((req, res, next) => {
+    if (!isAuthEnabled()) return next();
+    if (!req.path.startsWith('/api/') || req.path.startsWith('/api/auth/')) return next();
+    const token = parseCookie(req.headers.cookie, SESSION_COOKIE);
+    if (isValidSession(token)) return next();
+    res.status(401).json({ success: false, error: 'unauthorized' });
+  });
+
+  app.get('/api/auth/status', (req, res) => {
+    const enabled = isAuthEnabled();
+    const token = parseCookie(req.headers.cookie, SESSION_COOKIE);
+    res.json({ success: true, enabled, authenticated: !enabled || isValidSession(token) });
+  });
+
+  app.post('/api/auth/login', (req, res) => {
+    if (!isAuthEnabled()) return res.json({ success: true });
+    const password = String(req.body?.password ?? '');
+    if (!verifyDashboardPassword(password)) return res.status(401).json({ success: false, error: 'Incorrect password' });
+    const token = createSession();
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=2592000`);
+    res.json({ success: true });
+  });
+
+  app.post('/api/auth/logout', (req, res) => {
+    destroySession(parseCookie(req.headers.cookie, SESSION_COOKIE));
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0`);
+    res.json({ success: true });
+  });
+
+  // Setting a password for the first time needs no proof (nothing to prove
+  // yet); changing or clearing an existing one needs the current password —
+  // an already-valid session on its own isn't enough, or anyone with the
+  // dashboard open in a tab could lock everyone else out.
+  app.post('/api/auth/set-password', (req, res) => {
+    const { currentPassword, newPassword } = req.body ?? {};
+    if (isAuthEnabled() && !verifyDashboardPassword(String(currentPassword ?? ''))) {
+      return res.status(401).json({ success: false, error: 'Current password is required' });
+    }
+    setDashboardPassword(newPassword ? String(newPassword) : null);
+    res.json({ success: true });
+  });
 
   // ── Serve Vite build ──────────────────────────────────────────────────────
   const distCandidates = [
@@ -179,6 +229,7 @@ ${logs || '(no logs)'}`);
     const port = parseInt(req.params.port);
     if (!port || port <= 0) return res.status(400).json({ success: false, error: 'invalid port' });
     const result = await adoptPort(port);
+    if (result.success) appendAudit({ action: 'adopt', port, process: null, detail: result.command });
     res.json(result);
   });
 
@@ -209,9 +260,95 @@ ${logs || '(no logs)'}`);
     res.json({ success: killShellSession(cwd) });
   });
 
+  app.get('/api/favorites', (_req, res) => {
+    const config = getConfig();
+    res.json({ success: true, ports: config.favoritePorts, projects: config.favoriteProjects });
+  });
+
+  app.post('/api/favorites/ports/:port', (req, res) => {
+    const port = parseInt(req.params.port);
+    if (!port || port <= 0) return res.status(400).json({ success: false, error: 'invalid port' });
+    res.json({ success: true, ports: toggleFavoritePort(port) });
+  });
+
+  app.post('/api/favorites/projects', (req, res) => {
+    const relPath = String(req.body?.path ?? '');
+    if (!resolveProjectPath(relPath)) return res.status(400).json({ success: false, error: 'invalid path' });
+    res.json({ success: true, projects: toggleFavoriteProject(relPath) });
+  });
+
+  app.get('/api/projects/commands', (req, res) => {
+    const relPath = String(req.query.path ?? '');
+    if (!resolveProjectPath(relPath)) return res.status(400).json({ success: false, error: 'invalid path' });
+    res.json({ success: true, commands: getSavedCommands(relPath) });
+  });
+
+  app.post('/api/projects/commands', (req, res) => {
+    const relPath = String(req.body?.path ?? '');
+    const label = String(req.body?.label ?? '').trim();
+    const cmd = String(req.body?.cmd ?? '').trim();
+    if (!resolveProjectPath(relPath)) return res.status(400).json({ success: false, error: 'invalid path' });
+    if (!label || !cmd) return res.status(400).json({ success: false, error: 'label and cmd are required' });
+    res.json({ success: true, commands: addSavedCommand(relPath, { label, cmd }) });
+  });
+
+  app.delete('/api/projects/commands', (req, res) => {
+    const relPath = String(req.body?.path ?? '');
+    const index = parseInt(req.body?.index);
+    if (!resolveProjectPath(relPath)) return res.status(400).json({ success: false, error: 'invalid path' });
+    if (isNaN(index)) return res.status(400).json({ success: false, error: 'invalid index' });
+    res.json({ success: true, commands: removeSavedCommand(relPath, index) });
+  });
+
+  app.get('/api/projects/env', (req, res) => {
+    res.json(readEnvFile(String(req.query.path ?? '')));
+  });
+
+  app.post('/api/projects/env', (req, res) => {
+    res.json(writeEnvFile(String(req.body?.path ?? ''), String(req.body?.content ?? '')));
+  });
+
+  app.get('/api/config/export', (_req, res) => {
+    // The password hash never leaves the server — export is for sharing
+    // favorites/projects/commands, not for carrying auth secrets around.
+    const { authPasswordHash, ...rest } = getConfig();
+    res.json({ success: true, config: rest });
+  });
+
+  app.post('/api/config/import', (req, res) => {
+    const incoming = req.body?.config;
+    if (!incoming || typeof incoming !== 'object') return res.status(400).json({ success: false, error: 'invalid config payload' });
+    // Never let an imported file set/clear the password — that goes through
+    // /api/auth/set-password, which actually verifies you're allowed to.
+    delete incoming.authPasswordHash;
+    res.json({ success: true, config: replaceConfig({ ...getConfig(), ...incoming }) });
+  });
+
   app.post('/api/ports/:port/kill', (req, res) => {
-    const result = killPort(parseInt(req.params.port));
+    const port = parseInt(req.params.port);
+    // A managed (adopted) process's pid needs to go through stopManaged, not
+    // a plain signal — that's the only thing that tells its exit handler
+    // "the user asked for this," so auto-restart doesn't immediately undo it.
+    const managedPid = getManagedPortMap()[port];
+    if (managedPid != null) {
+      const stopped = stopManaged(managedPid);
+      appendAudit({ action: 'kill', port, process: null });
+      return res.json({ port, pid: managedPid, process: null, success: stopped, source: 'linux' });
+    }
+    const result = killPort(port);
+    if (result.success) appendAudit({ action: 'kill', port: result.port, process: result.process });
     res.json(result);
+  });
+
+  app.get('/api/audit', (req, res) => {
+    const limit = parseInt(String(req.query.limit ?? '200')) || 200;
+    res.json({ success: true, entries: getAuditLog(limit) });
+  });
+
+  app.post('/api/managed/:pid/autorestart', (req, res) => {
+    const pid = parseInt(req.params.pid);
+    const enabled = !!req.body?.enabled;
+    res.json({ success: setAutoRestart(pid, enabled), enabled });
   });
 
   app.post('/api/docker/:name/:action', (req, res) => {
@@ -282,6 +419,10 @@ ${logs || '(no logs)'}`);
     // for any latency-sensitive socket (terminals, games, chat) is to
     // disable it.
     (socket as Socket).setNoDelay(true);
+    if (isAuthEnabled()) {
+      const token = parseCookie(req.headers.cookie, SESSION_COOKIE);
+      if (!isValidSession(token)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+    }
     const pathname = (req.url ?? '/').split('?')[0];
     if (pathname.startsWith('/ws-logs/')) {
       logsWss.handleUpgrade(req, socket, head, ws => logsWss.emit('connection', ws, req));
@@ -412,16 +553,20 @@ function handleLogSocket(ws: WebSocket, req: http.IncomingMessage) {
   ws.on('error', cleanup);
 }
 
-// ── Interactive terminal (PTY) ───────────────────────────────────────────────
+// ── Interactive terminal (tmux-backed PTY) ───────────────────────────────────
 // URL: /ws-terminal?cwd=<path relative to the configured projects root>&cols&rows
 // Protocol: client -> {type:'input',data} | {type:'resize',cols,rows}  (JSON text frames)
 //           server -> raw binary frames = PTY output; JSON text frames for
 //                      {type:'status',data} | {type:'error',data} | {type:'exit',code}
-// The PTY is keyed by cwd and outlives any single connection — closing this
-// socket (tab closed, dialog minimized, page reloaded) only detaches this
-// viewer. A shell running `pnpm run dev` keeps running regardless; only an
-// explicit POST /api/terminal/kill ends it. Reattaching replays the buffered
-// output so nothing that happened while disconnected is lost.
+// Every folder's shell is a detached tmux session, not a PTY owned directly
+// by this process — a raw PTY dies the instant this server does (SIGHUP on
+// its controlling terminal closing), which used to mean a routine restart
+// or redeploy silently killed anything running inside, `pnpm run dev`
+// included. tmux sessions answer to nothing but tmux, so this connection
+// closing (tab closed, minimized, page reloaded) — or even this whole
+// dashboard restarting — only drops this *attach client*; only an explicit
+// POST /api/terminal/kill (tmux kill-session) ends the actual shell.
+// Reattaching gets tmux's own screen redraw, so nothing is lost.
 function handleTerminalSocket(ws: WebSocket, req: http.IncomingMessage) {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const relPath = url.searchParams.get('cwd') ?? '';
@@ -444,6 +589,12 @@ function handleTerminalSocket(ws: WebSocket, req: http.IncomingMessage) {
     }
   };
 
+  if (!isTmuxAvailable()) {
+    sendMsg('error', 'tmux is not installed — required for persistent terminals (sudo apt install tmux)');
+    ws.close();
+    return;
+  }
+
   const cwd = resolveProjectPath(relPath);
   if (!cwd) {
     sendMsg('error', 'Invalid or out-of-root path');
@@ -451,42 +602,40 @@ function handleTerminalSocket(ws: WebSocket, req: http.IncomingMessage) {
     return;
   }
 
-  let result;
+  let attach;
   try {
-    result = getOrCreateShell(cwd, cols, rows);
+    attach = attachShell(cwd, cols, rows);
   } catch (e: any) {
     sendMsg('error', `Could not start terminal: ${e.message}`);
     ws.close();
     return;
   }
-  const { session, isNew } = result;
+  const { proc, isNew } = attach;
 
-  if (session.buffer) sendOutput(session.buffer);
   sendMsg('status', isNew ? 'ready' : 'reattached');
 
-  const onData = (data: string) => sendOutput(data);
-  const onExit = ({ exitCode }: { exitCode: number }) => {
-    sendMsg('exit', exitCode);
+  const dataSub = proc.onData(data => sendOutput(data));
+  const exitSub = proc.onExit(() => {
+    sendMsg('exit', 0);
     try { ws.close(); } catch {}
-  };
-  const dataSub = session.proc.onData(onData);
-  const exitSub = session.proc.onExit(onExit);
+  });
 
   ws.on('message', raw => {
     try {
       const msg = JSON.parse(raw.toString());
-      if (msg.type === 'input' && typeof msg.data === 'string') session.proc.write(msg.data);
+      if (msg.type === 'input' && typeof msg.data === 'string') proc.write(msg.data);
       else if (msg.type === 'resize') {
         const c = Math.max(1, parseInt(msg.cols) || 80);
         const r = Math.max(1, parseInt(msg.rows) || 24);
-        session.proc.resize(c, r);
-        session.cols = c; session.rows = r;
+        proc.resize(c, r);
       }
     } catch {}
   });
 
-  // Detaching never kills the shell — only this connection's own listeners.
-  const cleanup = () => { dataSub.dispose(); exitSub.dispose(); };
+  // Dropping this connection only kills *this attach client* (like closing
+  // one of several terminal windows attached to the same tmux session) —
+  // the tmux session, and everything running inside it, is untouched.
+  const cleanup = () => { dataSub.dispose(); exitSub.dispose(); try { proc.kill(); } catch {} };
   ws.on('close', cleanup);
   ws.on('error', cleanup);
 }

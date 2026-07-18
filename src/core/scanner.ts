@@ -11,6 +11,47 @@ export interface PortInfo {
   source: 'linux' | 'windows';
   command?: string;
   cwd?: string;
+  cpuPercent?: number;
+  memoryMB?: number;
+}
+
+// Linux's USER_HZ is 100 on effectively every real system (x86/arm, glibc)
+// — there's no portable syscall-free way to read it, so this is the same
+// assumption /proc-reading tools like `top` and `ps` make in practice.
+const CLK_TCK = 100;
+
+// utime+stime deltas need a previous reading to turn into a rate — cached
+// per PID across scanPorts() calls (the dashboard polls every few seconds,
+// so consecutive calls land far enough apart for a meaningful delta).
+const cpuCache = new Map<number, { ticks: number; time: number }>();
+
+export function getProcessStats(pid: number): { cpuPercent: number; memoryMB: number } | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const afterComm = stat.substring(stat.lastIndexOf(')') + 2).split(' ');
+    const utime = parseInt(afterComm[11]); // field 14
+    const stime = parseInt(afterComm[12]); // field 15
+    const totalTicks = utime + stime;
+    const now = Date.now();
+
+    let cpuPercent = 0;
+    const prev = cpuCache.get(pid);
+    if (prev) {
+      const elapsedSec = (now - prev.time) / 1000;
+      if (elapsedSec > 0.1) cpuPercent = Math.max(0, ((totalTicks - prev.ticks) / CLK_TCK) / elapsedSec * 100);
+    }
+    cpuCache.set(pid, { ticks: totalTicks, time: now });
+
+    let memoryMB = 0;
+    try {
+      const m = readFileSync(`/proc/${pid}/status`, 'utf8').match(/VmRSS:\s+(\d+)\s+kB/);
+      if (m) memoryMB = parseInt(m[1]) / 1024;
+    } catch {}
+
+    return { cpuPercent: Math.round(cpuPercent * 10) / 10, memoryMB: Math.round(memoryMB * 10) / 10 };
+  } catch {
+    return null;
+  }
 }
 
 // ── Inode → PID map built from /proc/*/fd ───────────────────────────────────
@@ -272,6 +313,12 @@ export function scanPorts(targetPorts?: number[]): PortInfo[] {
         });
       }
     }
+  }
+
+  for (const r of results) {
+    if (r.pid == null) continue;
+    const stats = getProcessStats(r.pid);
+    if (stats) { r.cpuPercent = stats.cpuPercent; r.memoryMB = stats.memoryMB; }
   }
 
   return results

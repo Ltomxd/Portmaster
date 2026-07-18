@@ -6,7 +6,9 @@
       "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const s=JSON.parse\\(d\\);console.log\\('has managed field:', 'managed' in s\\)}\\)\")",
       "Bash(npx --yes playwright --version)",
       "Read(//home/kira/.cache/**)",
-      "Bash(npx --yes playwright install chromium --with-deps)"
+      "Bash(npx --yes playwright install chromium --with-deps)",
+      "Bash(node fav2.mjs)",
+      "Bash(curl -s -X POST http://localhost:54322/api/terminal/kill -H \"Content-Type: application/json\" -d '{\"cwd\":\"new-ZD/zd-new-backend\"}')"
     ]
   }
 }

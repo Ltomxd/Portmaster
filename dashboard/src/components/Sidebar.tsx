@@ -1,8 +1,10 @@
+import { useEffect, useRef, useState } from 'react'
 import raccoon from '../assets/raccoon.jpg'
 import { useLang } from '../context/LangContext'
 import type { WslInfo } from '../types'
+import { AuditLogDialog } from './AuditLogDialog'
 
-type Tab = 'overview' | 'docker' | 'pm2' | 'guard' | 'projects'
+type Tab = 'overview' | 'docker' | 'pm2' | 'guard' | 'projects' | 'favorites'
 
 interface Props {
   activeTab: Tab
@@ -15,6 +17,70 @@ interface Props {
 
 export function Sidebar({ activeTab, onTabChange, counts, wsl, isOpen = false, onClose }: Props) {
   const { lang, setLang, T } = useLang()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [configMsg, setConfigMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [auditOpen, setAuditOpen] = useState(false)
+  const [authEnabled, setAuthEnabled] = useState(false)
+  const [showPwForm, setShowPwForm] = useState(false)
+  const [currentPw, setCurrentPw] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [pwMsg, setPwMsg] = useState<{ text: string; ok: boolean } | null>(null)
+
+  useEffect(() => {
+    fetch('/api/auth/status').then(r => r.json()).then(d => setAuthEnabled(!!d.enabled)).catch(() => {})
+  }, [])
+
+  const savePassword = async () => {
+    try {
+      const r = await fetch('/api/auth/set-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ currentPassword: currentPw, newPassword: newPw }) })
+      const d = await r.json()
+      if (d.success) {
+        setAuthEnabled(!!newPw)
+        setPwMsg({ text: newPw ? T('password_set') : T('password_cleared'), ok: true })
+        setCurrentPw(''); setNewPw(''); setShowPwForm(false)
+      } else {
+        setPwMsg({ text: d.error ?? T('password_save_failed'), ok: false })
+      }
+    } catch {
+      setPwMsg({ text: T('password_save_failed'), ok: false })
+    }
+    setTimeout(() => setPwMsg(null), 3000)
+  }
+
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
+    window.location.reload()
+  }
+
+  const showMsg = (text: string, ok: boolean) => {
+    setConfigMsg({ text, ok })
+    setTimeout(() => setConfigMsg(null), 3000)
+  }
+
+  const exportConfig = async () => {
+    try {
+      const d = await fetch('/api/config/export').then(r => r.json())
+      if (!d.success) { showMsg(T('config_export_failed'), false); return }
+      const blob = new Blob([JSON.stringify(d.config, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = 'portmaster-config.json'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      showMsg(T('config_export_failed'), false)
+    }
+  }
+
+  const importConfig = async (file: File) => {
+    try {
+      const config = JSON.parse(await file.text())
+      const d = await fetch('/api/config/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config }) }).then(r => r.json())
+      showMsg(d.success ? T('config_import_ok') : (d.error ?? T('config_import_failed')), !!d.success)
+    } catch {
+      showMsg(T('config_import_failed'), false)
+    }
+  }
 
   const nav: { id: Tab; icon: string; label: string }[] = [
     { id: 'overview', icon: '⌂', label: T('overview') },
@@ -22,6 +88,7 @@ export function Sidebar({ activeTab, onTabChange, counts, wsl, isOpen = false, o
     { id: 'pm2', icon: '⟳', label: T('pm2') },
     { id: 'guard', icon: '⬡', label: T('guard') },
     { id: 'projects', icon: '📁', label: T('projects_title') },
+    { id: 'favorites', icon: '★', label: T('favorites_title') },
   ]
 
   return (
@@ -105,8 +172,34 @@ export function Sidebar({ activeTab, onTabChange, counts, wsl, isOpen = false, o
               ⊞ WSL{wsl.wslVersion} Active
             </div>
           )}
+
+          <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+            <button onClick={exportConfig} title={T('config_export')} style={{ flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)' }}>⭳ {T('config_export')}</button>
+            <button onClick={() => fileInputRef.current?.click()} title={T('config_import')} style={{ flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)' }}>⭱ {T('config_import')}</button>
+            <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) importConfig(f); e.target.value = '' }} />
+          </div>
+          {configMsg && (
+            <div style={{ marginTop: 8, fontSize: 10, textAlign: 'center', color: configMsg.ok ? 'var(--green)' : 'var(--red2)' }}>{configMsg.text}</div>
+          )}
+          <button onClick={() => setAuditOpen(true)} style={{ width: '100%', marginTop: 8, padding: '5px 0', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)' }}>📋 {T('audit_log_title')}</button>
+
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <button onClick={() => setShowPwForm(s => !s)} style={{ flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)' }}>🔒 {authEnabled ? T('change_password') : T('set_password')}</button>
+            {authEnabled && <button onClick={logout} style={{ flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)' }}>⏻ {T('logout')}</button>}
+          </div>
+          {showPwForm && (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {authEnabled && <input type="password" value={currentPw} onChange={e => setCurrentPw(e.target.value)} placeholder={T('current_password')} style={pwInput} />}
+              <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') savePassword() }} placeholder={T('new_password_placeholder')} style={pwInput} />
+              <button onClick={savePassword} style={{ padding: '5px 0', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'rgba(116,185,255,.15)', border: '1px solid rgba(116,185,255,.4)', color: 'var(--blue)' }}>{T('save')}</button>
+            </div>
+          )}
+          {pwMsg && <div style={{ marginTop: 6, fontSize: 10, textAlign: 'center', color: pwMsg.ok ? 'var(--green)' : 'var(--red2)' }}>{pwMsg.text}</div>}
         </div>
       </aside>
+      <AuditLogDialog open={auditOpen} onClose={() => setAuditOpen(false)} />
     </>
   )
 }
+
+const pwInput: React.CSSProperties = { background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 11, outline: 'none' }

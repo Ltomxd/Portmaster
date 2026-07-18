@@ -37,6 +37,9 @@ const TERMINAL_THEME = {
 interface Props {
   cwd: string        // relative path from the projects root
   label: string       // display title, e.g. the folder name
+  embedded?: boolean  // rendered side-by-side in a split view — no own backdrop, no fullscreen
+  pendingCommand?: string // run once right after connecting (saved commands), then cleared
+  onCommandSent?: () => void
   onHide: () => void
   onMinimize: () => void
   onStop: () => void
@@ -50,7 +53,7 @@ type Status = 'connecting' | 'live' | 'closed' | 'error'
 // only drops the WebSocket, never the shell. Reopening the same folder
 // reconnects and replays whatever ran while it was closed, so something
 // like `pnpm run dev` keeps going. Only onStop actually ends it.
-export function TerminalPanel({ cwd, label, onHide, onMinimize, onStop }: Props) {
+export function TerminalPanel({ cwd, label, embedded, pendingCommand, onCommandSent, onHide, onMinimize, onStop }: Props) {
   const { T } = useLang()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -58,6 +61,13 @@ export function TerminalPanel({ cwd, label, onHide, onMinimize, onStop }: Props)
   const wsRef = useRef<WebSocket | null>(null)
   const [status, setStatus] = useState<Status>('connecting')
   const [fullscreen, setFullscreen] = useState(false)
+
+  // Kept current on every render but read only once, at connect time — the
+  // main effect below only depends on `cwd`, so it must not reconnect just
+  // because a fresh pendingCommand/onCommandSent identity came in.
+  const pendingCommandRef = useRef(pendingCommand)
+  const onCommandSentRef = useRef(onCommandSent)
+  useEffect(() => { pendingCommandRef.current = pendingCommand; onCommandSentRef.current = onCommandSent })
 
   useEffect(() => {
     const container = containerRef.current
@@ -106,7 +116,17 @@ export function TerminalPanel({ cwd, label, onHide, onMinimize, onStop }: Props)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
 
-      ws.onopen = () => setStatus('live')
+      ws.onopen = () => {
+        setStatus('live')
+        // Give tmux's attach redraw a beat to land before typing over it.
+        if (pendingCommandRef.current) {
+          const cmd = pendingCommandRef.current
+          setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
+            onCommandSentRef.current?.()
+          }, 200)
+        }
+      }
       ws.onmessage = e => {
         // PTY output arrives as a raw binary frame (see server.ts) — skips
         // JSON parsing on the hottest path so bursty output (command
@@ -167,37 +187,45 @@ export function TerminalPanel({ cwd, label, onHide, onMinimize, onStop }: Props)
   }
   const sm = statusMeta[status]
 
-  return (
-    <div onClick={onHide} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', backdropFilter: 'blur(3px)', zIndex: 230, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn .15s' }}>
-      <div
-        onClick={e => e.stopPropagation()}
-        style={fullscreen
+  const card = (
+    <div
+      onClick={e => e.stopPropagation()}
+      style={embedded
+        ? { background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 12, padding: 16, flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', boxShadow: '0 25px 60px rgba(0,0,0,.6)' }
+        : fullscreen
           ? { background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 12, padding: 16, width: '96vw', height: '94vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 60px rgba(0,0,0,.6)', animation: 'slideUp .2s ease' }
           : { background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 12, padding: 16, width: 'min(96vw, 900px)', height: 'min(80vh, 560px)', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 60px rgba(0,0,0,.6)', animation: 'slideUp .2s ease' }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-            <span style={{ fontSize: 16 }}>🖳</span>
-            <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{T('terminal_title')} — {label}</div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: sm.color, fontWeight: 600 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: sm.color, display: 'inline-block', animation: status === 'live' ? 'pulse 2s infinite' : 'none' }} />
-              {sm.label}
-            </span>
-            <button onClick={onMinimize} title={T('logs_minimize')} style={iconBtn}>🗕</button>
-            <button onClick={() => setFullscreen(f => !f)} title={fullscreen ? T('logs_exit_fullscreen') : T('logs_fullscreen')} style={iconBtn}>{fullscreen ? '⤡' : '⛶'}</button>
-          </div>
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <span style={{ fontSize: 16 }}>🖳</span>
+          <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{T('terminal_title')} — {label}</div>
         </div>
-
-        <div ref={containerRef} style={{ flex: 1, minHeight: 0, borderRadius: 8, overflow: 'hidden', background: '#0a0a12', padding: '6px 8px' }} />
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-          <button onClick={onHide} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500 }}>{T('logs_close')}</button>
-          <button onClick={onStop} title={T('terminal_stop_hint')} style={{ background: 'var(--red-glow)', border: '1px solid rgba(229,62,62,.35)', color: 'var(--red2)', padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>⏹ {T('logs_stop')}</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: sm.color, fontWeight: 600 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: sm.color, display: 'inline-block', animation: status === 'live' ? 'pulse 2s infinite' : 'none' }} />
+            {sm.label}
+          </span>
+          <button onClick={onMinimize} title={T('logs_minimize')} style={iconBtn}>🗕</button>
+          {!embedded && <button onClick={() => setFullscreen(f => !f)} title={fullscreen ? T('logs_exit_fullscreen') : T('logs_fullscreen')} style={iconBtn}>{fullscreen ? '⤡' : '⛶'}</button>}
         </div>
-        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6, textAlign: 'right' }}>{T('terminal_close_hint')}</div>
       </div>
+
+      <div ref={containerRef} style={{ flex: 1, minHeight: 0, borderRadius: 8, overflow: 'hidden', background: '#0a0a12', padding: '6px 8px' }} />
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+        <button onClick={onHide} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500 }}>{T('logs_close')}</button>
+        <button onClick={onStop} title={T('terminal_stop_hint')} style={{ background: 'var(--red-glow)', border: '1px solid rgba(229,62,62,.35)', color: 'var(--red2)', padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>⏹ {T('logs_stop')}</button>
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6, textAlign: 'right' }}>{T('terminal_close_hint')}</div>
+    </div>
+  )
+
+  if (embedded) return card
+
+  return (
+    <div onClick={onHide} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', backdropFilter: 'blur(3px)', zIndex: 230, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn .15s' }}>
+      {card}
     </div>
   )
 }
