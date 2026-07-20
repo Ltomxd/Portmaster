@@ -22,6 +22,8 @@
 | 🔁 **Adopt a process** | Turn an already-running host process into a live-logged one — kills and relaunches it under Portmaster's supervision, no code changes needed |
 | ▶ **`portmaster dev`** | Wrap any dev command (`portmaster dev -- pnpm run dev`) to get live logs for it without adopting — your terminal output looks identical, Portmaster just also taps it |
 | 📁 **Projects + Terminal** | Browse a saved projects folder from the dashboard and open a real, interactive Bash terminal (Nerd Font icons, GPU-rendered) scoped to any subfolder — backed by a detached `tmux` session per folder, so a `pnpm run dev` you left running survives minimize, tab close, page refresh, *and even a dashboard restart*, until you explicitly stop it |
+| 🪟 **Floating terminal windows** | Every open terminal is its own free-floating window — drag it anywhere by the title bar, open as many as you want at once (no more 2-window cap). Minimizing keeps it connected in the background instead of tearing it down, so restoring is instant and the status dot stays green; if the connection does drop for real (e.g. a dashboard restart), it reconnects on its own |
+| 🗔 **Terminal dock** | Once more than two terminals are open (shown or minimized), a small draggable dock appears with a live count — click it to see every terminal and jump straight to any of them |
 | 🐳 **Docker** | List, start, stop, restart containers + port mapping + live logs |
 | 🔄 **PM2** | Full PM2 integration — list, restart, stop + live logs |
 | 📋 **Orchestration** | Manage multi-service stacks with `.portmaster.yaml` |
@@ -31,7 +33,7 @@
 | 🕐 **Live clock** | Auto-detects your timezone, ticks every second, click to toggle 12h/24h |
 | ★ **Favorites** | Pin ports and project folders so they float to the top of their lists |
 | ⚡ **Saved commands** | One-click buttons per project folder (`pnpm dev`, `docker compose up`, …) that run in that folder's terminal |
-| ⊞ **Split terminal** | Open a second terminal alongside the active one — two folders' shells side by side |
+| ⊞ **Split terminal** | Open a second terminal alongside the active one instead of replacing it — since every terminal now floats independently, drag them side by side (or anywhere else) yourself |
 | 📝 **.env editor** | Read and write a folder's `.env` right from the Projects tab, no editor needed |
 | ⭳ **Export / import config** | Back up favorites, saved commands, and your projects root as one JSON file |
 | 📊 **Per-process CPU / Mem** | Live resource usage in the process table, computed from `/proc` deltas |
@@ -59,11 +61,12 @@ source ~/.bashrc
 
 ## Build the dashboard (first time)
 
+The repo is a pnpm workspace (CLI/server at the root, the React dashboard under `dashboard/`), so one `pnpm install` at the root sets up both:
+
 ```bash
-cd dashboard
-pnpm install
-pnpm run build
-cd ..
+pnpm install                               # installs deps for the CLI/server AND the dashboard
+pnpm --filter portmaster-dashboard build   # build the dashboard frontend
+pnpm run build                             # build the CLI/server
 pnpm run dashboard
 ```
 
@@ -171,8 +174,10 @@ pm2 status
 
 **Protect (🛡):** creates a guard that auto-kills anything else that binds a protected port, with an editable list of allowed process names and a check-interval preset. Protected ports show a 🛡 badge right in the table.
 
-**Projects tab:** point it at the folder where your projects live (e.g. `/home/you/code`) — saved once, reused every time the dashboard starts. Browse into any subfolder and open a real interactive Bash terminal there (🖳), rendered with `@xterm/xterm` (GPU-accelerated via WebGL when available) over a raw binary WebSocket for lag-free typing and output. Each terminal is backed by a detached `tmux` session, one per folder — not just a PTY owned by the dashboard process — so minimizing it, closing the tab, refreshing the page, *or the dashboard itself restarting* never touches what's running inside: leave `pnpm run dev` going and it keeps going, full stop. A green "Running" indicator marks any folder with a live session, and its tray chip survives a reload too. Only the explicit **Terminar** button (`tmux kill-session`) actually ends it.
-- **⊞ Split** opens a second terminal alongside the current one instead of replacing it — handy for watching a backend and frontend dev server at once.
+**Projects tab:** point it at the folder where your projects live (e.g. `/home/you/code`) — saved once, reused every time the dashboard starts. Browse into any subfolder and open a real interactive Bash terminal there (🖳), rendered with `@xterm/xterm` (GPU-accelerated via WebGL when available) over a raw binary WebSocket for lag-free typing and output. Each terminal is backed by a detached `tmux` session, one per folder — not just a PTY owned by the dashboard process — so minimizing it, closing the tab, refreshing the page, *or the dashboard itself restarting* never touches what's running inside: leave `pnpm run dev` going and it keeps going, full stop. A green "Running" indicator marks any folder with a live session. Only the explicit **Terminar** button (`tmux kill-session`) actually ends it.
+- **Floating windows:** every terminal is its own free-floating, draggable window (grab the title bar) — open as many as you like, arrange them however you want. Minimizing keeps the window connected in the background instead of disconnecting it, so the status dot stays green and restoring it is instant, with no reconnect flicker. A genuinely dropped connection (e.g. the dashboard process restarting) reconnects on its own.
+- **Terminal dock:** once more than two terminals are open (shown or minimized), a small draggable dock replaces the tray — click it to see every terminal in one list and jump straight to any of them, or stop one from there.
+- **⊞ Split** opens a second terminal alongside the current one instead of replacing it — handy for watching a backend and frontend dev server at once; drag either window anywhere afterward.
 - **★** on any folder pins it to the top of the list; the same star on a port row in Overview does the same there.
 - **+ Add command** saves a one-click button (a label and a shell command) scoped to that folder — click it and it opens/reuses that folder's terminal and runs the command for you.
 - **📝 .env** opens a small editor for that folder's `.env` file (hidden from the regular listing on purpose) — read, edit, save, no need to open a real editor for a one-line change.
