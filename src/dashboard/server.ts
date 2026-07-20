@@ -446,7 +446,7 @@ ${logs || '(no logs)'}`);
 
   server.listen(PORT, HOST, () => {
     console.log(`\n  ✓ Dashboard → http://${HOST}:${PORT}\n`);
-    if (!distPath) console.log('  ⚠ Frontend not built. Run: cd dashboard && npm run build\n');
+    if (!distPath) console.log('  ⚠ Frontend not built. Run: cd dashboard && pnpm run build\n');
   });
 }
 
@@ -718,7 +718,7 @@ function fallbackHtml(): string {
 <body style="background:#0f1117;color:#e2e8f0;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;margin:0">
   <h2 style="margin:0;font-size:24px">⚡ Portmaster</h2>
   <p style="color:#64748b;margin:0">Build the frontend first:</p>
-  <code style="background:#1c2333;padding:12px 24px;border-radius:8px;color:#a78bfa;font-size:14px">cd dashboard && npm run build</code>
+  <code style="background:#1c2333;padding:12px 24px;border-radius:8px;color:#a78bfa;font-size:14px">cd dashboard && pnpm run build</code>
   <p style="color:#64748b;margin:0;font-size:12px">Then restart: portmaster dashboard</p>
 </body></html>`;
 }

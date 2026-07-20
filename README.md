@@ -53,7 +53,7 @@ bash install.sh
 source ~/.bashrc
 ```
 
-> **Requirements:** Node.js 18+; `python3` + `make` + `g++` (or `build-essential`) for compiling the native terminal module (`node-pty`) on first `npm install`; and `tmux` (`sudo apt install tmux`) — the Projects tab's terminals run as detached tmux sessions so they survive not just a closed browser tab but a dashboard restart too.
+> **Requirements:** Node.js 18+; `pnpm` (`corepack enable` — Node ships it, no separate install needed); `python3` + `make` + `g++` (or `build-essential`) for compiling the native terminal module (`node-pty`) on first `pnpm install`; and `tmux` (`sudo apt install tmux`) — the Projects tab's terminals run as detached tmux sessions so they survive not just a closed browser tab but a dashboard restart too.
 
 ---
 
@@ -61,10 +61,10 @@ source ~/.bashrc
 
 ```bash
 cd dashboard
-npm install
-npm run build
+pnpm install
+pnpm run build
 cd ..
-npm run dashboard
+pnpm run dashboard
 ```
 
 ---

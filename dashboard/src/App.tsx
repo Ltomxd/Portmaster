@@ -180,6 +180,8 @@ function Dashboard() {
         onHide={terminalSessions.hide}
         onMinimize={terminalSessions.minimize}
         onStop={terminalSessions.stop}
+        onMove={terminalSessions.move}
+        onFocus={terminalSessions.focus}
         onCommandSent={terminalSessions.clearPendingCommand}
       />
       <CommandPalette

@@ -51,7 +51,7 @@ env:
 
 services:
   frontend:
-    command: npm run dev
+    command: pnpm run dev
     port: 3000
     dir: ./frontend
     startup_delay: 2
@@ -59,7 +59,7 @@ services:
       PORT: "3000"
 
   backend:
-    command: npm run start:dev
+    command: pnpm run start:dev
     port: 8000
     dir: ./backend
     depends_on:

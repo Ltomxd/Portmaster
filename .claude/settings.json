@@ -8,7 +8,8 @@
       "Read(//home/kira/.cache/**)",
       "Bash(npx --yes playwright install chromium --with-deps)",
       "Bash(node fav2.mjs)",
-      "Bash(curl -s -X POST http://localhost:54322/api/terminal/kill -H \"Content-Type: application/json\" -d '{\"cwd\":\"new-ZD/zd-new-backend\"}')"
+      "Bash(curl -s -X POST http://localhost:54322/api/terminal/kill -H \"Content-Type: application/json\" -d '{\"cwd\":\"new-ZD/zd-new-backend\"}')",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

@@ -170,7 +170,7 @@ export function getSecurityLogs(pid: number, comm: string | null, lines = 100): 
 }
 
 // ── Resolve a real, independently-tailable log file for a host process ──────
-// Most hand-run dev servers (`npm run dev`, a bare `node server.js`, …) never
+// Most hand-run dev servers (`pnpm run dev`, a bare `node server.js`, …) never
 // touch journald — their stdout/stderr go straight to whichever terminal or
 // redirect target launched them. journalctl -f is therefore silent for them
 // even though nothing is wrong, and a pty can't be safely snooped by a second

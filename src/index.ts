@@ -165,7 +165,7 @@ program
   .action((opts) => {
     if (!isPm2Available()) {
       printError('PM2 is not installed or not in PATH');
-      printInfo('Install with: npm install -g pm2');
+      printInfo('Install with: pnpm add -g pm2');
       process.exit(1);
     }
 

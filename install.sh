@@ -52,7 +52,7 @@ ok "Node.js $(node --version)"
 
 # ── Check optional tools ──────────────────────────────────────────────────────
 command -v docker &>/dev/null && docker info &>/dev/null 2>&1 && ok "Docker available — container monitoring enabled" || warn "Docker not running (optional)"
-command -v pm2 &>/dev/null && ok "PM2 available — process manager integration enabled" || warn "PM2 not found (optional, install: npm i -g pm2)"
+command -v pm2 &>/dev/null && ok "PM2 available — process manager integration enabled" || warn "PM2 not found (optional, install: pnpm add -g pm2)"
 
 # ── Create bin wrappers ───────────────────────────────────────────────────────
 info "Installing binaries..."
